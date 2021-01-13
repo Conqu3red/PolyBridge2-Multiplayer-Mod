@@ -7,20 +7,9 @@ using HarmonyLib;
 using System.Reflection;
 using System.Collections.Generic;
 using BepInEx.Configuration;
-using PolyPhysics.Viewers;
-using Poly.Physics;
-using Poly.Math;
 using PolyPhysics;
-using Common.Class;
-using Common.Extension;
-using System.Collections;
-using System.IO;
-using Fleck;
 using System.Net.WebSockets;
-using System.Text;
 using System.Threading;
-using ConsoleMod;
-using System.Collections.Concurrent;
 
 namespace P2PMod
 {
@@ -44,12 +33,9 @@ namespace P2PMod
         public static ConfigEntry<string>
             username;
         public static P2PMod instance;
-        public WebSocketServer server;
-        public bool serverEnabled = false;
+        public static string ClientName = "";
         public bool clientEnabled = false;
         public ServerCommunication communication;
-        List<Fleck.IWebSocketConnection> sockets = new List<IWebSocketConnection> ();
-        //ConcurrentBag<Fleck.IWebSocketConnection> sockets = new ConcurrentBag<IWebSocketConnection> ();
 
         public Dictionary<actionType, bool> ClientRecieving = new Dictionary<actionType, bool> {};
         
@@ -70,13 +56,10 @@ namespace P2PMod
 
             PolyTechMain.registerMod(this);
             Logger.LogInfo("P2P MOD");
-
-            uConsole.RegisterCommand("enable_server", new uConsole.DebugCommand(EnableServer));
-            uConsole.RegisterCommand("disable_server", new uConsole.DebugCommand(DisableServer));
-            uConsole.RegisterCommand("enable_client", new uConsole.DebugCommand(EnableClient));
-            uConsole.RegisterCommand("disable_client", new uConsole.DebugCommand(DisableClient));
-            uConsole.RegisterCommand("list_connections", new uConsole.DebugCommand(ListConnections));
-
+            uConsole.RegisterCommand("name", new uConsole.DebugCommand(Name));
+            uConsole.RegisterCommand("connect", new uConsole.DebugCommand(Connect));
+            uConsole.RegisterCommand("disconnect", new uConsole.DebugCommand(Disconnect));
+            uConsole.RegisterCommand("connection_info", new uConsole.DebugCommand(ConnectionInfo));
         }
 
         public void Update(){
@@ -89,15 +72,14 @@ namespace P2PMod
         public void OnConnectedToServer()
         {
             instance.communication.Lobby.OnConnectedToServer -= instance.OnConnectedToServer;
-
-            instance.communication.Lobby.OnEchoMessage += instance.OnReceivedEchoMessage;
+            instance.communication.Lobby.OnBridgeAction += instance.OnBridgeAction;
         }
-        public void OnReceivedEchoMessage(EchoMessageModel message)
+        public void OnBridgeAction(BridgeActionModel message)
         {
             BridgeEdgeProxy edgeProxy;
             BridgeEdge edge;
             BridgeSpringProxy springProxy;
-            BridgeSpring spring;
+            PistonProxy pistonProxy;
             BridgeJointProxy jointProxy;
             BridgeJoint joint;
             instance.Logger.LogInfo($"<CLIENT> received {message.action}");
@@ -105,9 +87,30 @@ namespace P2PMod
                 case actionType.CREATE_EDGE:
                     instance.ClientRecieving[actionType.CREATE_EDGE] = true;
                     edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
-                    BridgeEdges.CreateEdgeFromProxy(edgeProxy);
-                    instance.ClientRecieving[actionType.CREATE_EDGE] = false;
+                    //BridgeEdges.CreateEdgeFromProxy(edgeProxy);
+                    BridgeEdge edgeFromJoints = BridgeEdges.GetEdgeFromJoints(
+                        BridgeJoints.FindByGuid(edgeProxy.m_NodeA_Guid),
+                        BridgeJoints.FindByGuid(edgeProxy.m_NodeB_Guid)
+                    );
+                    if (edgeFromJoints){
+                        edgeFromJoints.ForceDisable();
+                    }
+                    edge = BridgeEdges.CreateEdgeWithPistonOrSpring(
+                        BridgeJoints.FindByGuid(edgeProxy.m_NodeA_Guid),
+                        BridgeJoints.FindByGuid(edgeProxy.m_NodeB_Guid),
+                        edgeProxy.m_Material
+                    );
                     
+                    if (edge.IsPiston())
+		            {
+		            	Pistons.GetPistonOnEdge(edge).m_Slider.MakeVisible();
+		            }
+		            if (edge.IsSpring())
+		            {
+		            	edge.m_SpringCoilVisualization.m_Slider.MakeVisible();
+		            }
+
+                    instance.ClientRecieving[actionType.CREATE_EDGE] = false;
                     break;
                 case actionType.CREATE_JOINT:
                     instance.ClientRecieving[actionType.CREATE_JOINT] = true;
@@ -132,112 +135,74 @@ namespace P2PMod
                     BridgeJointMovement.m_SelectedJoint.transform.position = jointProxy.m_Pos;
                     BridgeJointMovement.FinalizeMovement();
                     break;
+                case actionType.SPRING_SLIDER_TRANSLATE:
+                    springProxy = JsonUtility.FromJson<BridgeSpringProxy>(message.content);
+                    var spring = BridgeEdges.FindEnabledEdgeByJointGuids(
+                        springProxy.m_NodeA_Guid,
+                        springProxy.m_NodeB_Guid,
+                        BridgeMaterialType.SPRING
+                    );
+                    spring.m_SpringCoilVisualization.m_Slider.SetNormalizedValue(springProxy.m_NormalizedValue);
+				    spring.m_SpringCoilVisualization.UpdateFreeLengthFromSliderPos();
+                    spring.m_SpringCoilVisualization.MaybeRecreateLinks();
+				    spring.m_SpringCoilVisualization.UpdateLinks();
+                    break;
+                case actionType.PISTON_SLIDER_TRANSLATE:
+                    pistonProxy = JsonUtility.FromJson<PistonProxy>(message.content);
+                    var piston = Pistons.GetPistonOnEdge(BridgeEdges.FindEnabledEdgeByJointGuids(
+                        pistonProxy.m_NodeA_Guid,
+                        pistonProxy.m_NodeB_Guid,
+                        BridgeMaterialType.HYDRAULICS
+                    ));
+                    piston.m_Slider.SetNormalizedValue(pistonProxy.m_NormalizedValue);
+                    piston.m_Slider.MakeVisible();
+                    break;
                 default:
                     instance.Logger.LogError("<CLIENT> recieved unexpected action");
                     break;
             }
             
         }
-
-
-
-        
-        public static void EnableServer(){
-            if (instance.serverEnabled) {
-                uConsole.Log("Server is already enabled");
+        public static void Name(){
+            if (uConsole.GetNumParameters() == 1){
+                ClientName = uConsole.GetString();
+                uConsole.Log($"Set name to {ClientName}");
                 return;
             }
-            instance.server = new WebSocketServer($"ws://127.0.0.1:8181/{username.Value}");
+            uConsole.Log($"Name is: {ClientName}");
             
-            
-            instance.server.Start(socket =>
-            {
-                socket.OnOpen = () => {
-                    instance.Logger.LogInfo("<SERVER> New Connection Opened");
-                    instance.sockets.Add(socket);
-                };
-                socket.OnClose = () => {
-                    instance.Logger.LogInfo("<SERVER> A Connection was Closed");
-                    instance.sockets.Remove(socket);
-                    //List<IWebSocketConnection> temp_store = new List<IWebSocketConnection>();
-                    //while (!instance.sockets.IsEmpty){
-                    //    instance.sockets.TryTake(out var t);
-                    //    temp_store.Add(t);
-                    //}
-                    //foreach (var s in temp_store){
-                    //    if (s == socket) continue;
-                    //    instance.sockets.Add(s);
-                    //}
-                };
-                socket.OnMessage = message => {
-                    var message_decoded = JsonUtility.FromJson<MessageModel>(message);
-                    if (message_decoded.method == LobbyMessaging.Echo){
-                        var content = JsonUtility.FromJson<EchoMessageModel>(message_decoded.message);
-                        instance.Logger.LogInfo($"<SERVER> received {content.action}");
-                        /*switch (content.action){
-                            case actionType.CREATE_EDGE:
-                                //var edge = JsonUtility.FromJson<BridgeEdgeProxy>(content.content);
-                                break;
-                            case actionType.CREATE_JOINT:
-                                //var joint = JsonUtility.FromJson<BridgeJointProxy>(content.content);
-                                break;
-                            case actionType.DELETE_EDGE:
-                                //var edge = JsonUtility.FromJson<BridgeEdgeProxy>(content.content);
-                                break;
-                            case actionType.DELETE_JOINT:
-                                //var joint = JsonUtility.FromJson<BridgeJointProxy>(content.content);
-                                break;
-                            default:
-                                instance.Logger.LogError("Invalid Action");
-                                break;
-                        }*/
-                    }
-                    //socket.Send(message);
-                    foreach (var s in instance.sockets){
-                        if (s.ConnectionInfo.Id == socket.ConnectionInfo.Id) continue;
-                        s.Send(message);
-                    }
-                };
-            });
-            uConsole.Log("Enabled Server");
-            instance.serverEnabled = true;
         }
-        public static void DisableServer(){
-            if (instance.server == null){
-                uConsole.Log("Server is already Disabled");
-                return;
-            }
-            instance.server.ListenerSocket.Close();
-            instance.server.Dispose();
-            instance.server = null;
-            uConsole.Log("Disabled Server");
-            instance.serverEnabled = false;
-        }
-        public static void ListConnections(){
-            if (!instance.serverEnabled) return;
-            foreach (Fleck.IWebSocketConnection connection in instance.sockets){
-                uConsole.Log($"IP: {connection.ConnectionInfo.ClientIpAddress} Path: {connection.ConnectionInfo.Path}");
-            }
-        }
-
-        public static void EnableClient(){
+        public static void Connect(){
             if (instance.clientEnabled){
-                uConsole.Log("Client is already enabled");
+                uConsole.Log("Already Connected to a server");
                 return;
             }
+            if (ClientName == ""){
+                uConsole.Log("You need to set a name using name <name>");
+                return;
+            }
+            if (uConsole.GetNumParameters() < 3){
+                uConsole.Log("Usage: Connect <host_ip> <port> <server_name>");
+                return;
+            }
+            string hostIP = uConsole.GetString();
+            int port = uConsole.GetInt();
+            string server_name = uConsole.GetString();
             instance.communication = new ServerCommunication();
-            instance.communication.useLocalhost = true;
-            instance.communication.port = 8181;
+            instance.communication.useLocalhost = false;
+            instance.communication.hostIP = hostIP;
+            instance.communication.path = $"{server_name}?username={ClientName}";
+            instance.communication.port = port;
             instance.communication.Init();
             instance.communication.Lobby.OnConnectedToServer += instance.OnConnectedToServer;
             instance.communication.ConnectToServer();
             instance.OnConnectedToServer();
-            uConsole.Log("Enabled Client");
+            //uConsole.Log("Enabled Client");
             instance.clientEnabled = true;
         }
-        public static void DisableClient(){
+        public static void Disconnect(){
             if (!instance.clientEnabled){
-                uConsole.Log("Client is already disabled.");
+                uConsole.Log("You aren't connected to anything.");
                 return;
             }
             instance.communication.client.ws.CloseAsync(
@@ -248,6 +213,11 @@ namespace P2PMod
             instance.communication = null;
             uConsole.Log("Disabled Client");
             instance.clientEnabled = false;
+        }
+        public static void ConnectionInfo(){
+            if (!instance.clientEnabled) return;
+            uConsole.Log($"Connected to {instance.communication.hostIP}:{instance.communication.port}");
+            uConsole.Log($"Connected to server {instance.communication.path}");
         }
 
         public void onEnableDisable(object sender, EventArgs e)
@@ -305,13 +275,15 @@ namespace P2PMod
                 if (!instance.clientEnabled) return;
                 instance.ClientRecieving.TryGetValue(actionType.CREATE_EDGE, out var ClientIsRecieving);
                 if (ClientIsRecieving) return;
+                if (Bridge.IsSimulating()) return;
+                if (physicsEdge_onlyUsedWhenBreakingEdgesInSimulation) return;
                 var edge = new BridgeEdgeProxy(__result);
-                var message = new EchoMessageModel {
+                var message = new BridgeActionModel {
                     action = actionType.CREATE_EDGE,
                     content = JsonUtility.ToJson(edge)
                 };
                 instance.Logger.LogInfo("<CLIENT> sending CREATE_EDGE");
-                instance.communication.Lobby.EchoMessage(message);
+                instance.communication.Lobby.SendBridgeAction(message);
         
             }
         }
@@ -329,12 +301,12 @@ namespace P2PMod
                 instance.ClientRecieving.TryGetValue(actionType.CREATE_JOINT, out var ClientIsRecieving);
                 if (ClientIsRecieving) return;
                 var joint = new BridgeJointProxy(__result);
-                var message = new EchoMessageModel {
+                var message = new BridgeActionModel {
                     action = actionType.CREATE_JOINT,
                     content = JsonUtility.ToJson(joint)
                 };
                 instance.Logger.LogInfo("<CLIENT> sending CREATE_JOINT");
-                instance.communication.Lobby.EchoMessage(message);
+                instance.communication.Lobby.SendBridgeAction(message);
         
             }
         }
@@ -381,22 +353,22 @@ namespace P2PMod
 		        foreach (BridgeJoint j in list){
 
                     var joint = new BridgeJointProxy(j);
-                    var message = new EchoMessageModel {
+                    var message = new BridgeActionModel {
                         action = actionType.DELETE_JOINT,
                         content = JsonUtility.ToJson(joint)
                     };
                     instance.Logger.LogInfo("<CLIENT> sending DELETE_JOINT");
-                    instance.communication.Lobby.EchoMessage(message);
+                    instance.communication.Lobby.SendBridgeAction(message);
                 }
 
                 foreach (BridgeEdge e in BridgeSelectionSet.m_Edges){
                     var joint = new BridgeEdgeProxy(e);
-                    var message = new EchoMessageModel {
+                    var message = new BridgeActionModel {
                         action = actionType.DELETE_EDGE,
                         content = JsonUtility.ToJson(joint)
                     };
                     instance.Logger.LogInfo("<CLIENT> sending DELETE_EDGE");
-                    instance.communication.Lobby.EchoMessage(message);
+                    instance.communication.Lobby.SendBridgeAction(message);
                     
                 }
                 
@@ -411,15 +383,59 @@ namespace P2PMod
 		            if (!Mathf.Approximately(translation.magnitude, 0f)){
                         var joint = new BridgeJointProxy(BridgeJointMovement.m_SelectedJoint);
                         joint.m_Pos = BridgeJointMovement.m_SelectedJoint.transform.position;
-                        var message = new EchoMessageModel {
+                        var message = new BridgeActionModel {
                             action = actionType.TRANSLATE_JOINT,
                             content = JsonUtility.ToJson(joint)
                         };
                         instance.Logger.LogInfo("<CLIENT> sending TRANSLATE_JOINT");
-                        instance.communication.Lobby.EchoMessage(message);
+                        instance.communication.Lobby.SendBridgeAction(message);
                     }
                 }
             }
+            [HarmonyPatch(typeof(BridgeSprings), "ForceSliderRelease")]
+            public static class SpringSlideTranslatePatch {
+                public static void Prefix(
+                    ref float ___m_NormalizedSliderValueWhenStartMoving
+                ){
+                    if (!instance.clientEnabled) return;
+                    if (BridgeSprings.m_SliderFollowingMouse){
+		            	float num = BridgeSprings.m_SliderFollowingMouse.GetNormalizedValue() - ___m_NormalizedSliderValueWhenStartMoving;
+		            	if (!Mathf.Approximately(num, 0f)){
+                            var spring = new BridgeSpringProxy(BridgeSprings.m_SliderFollowingMouse.m_BridgeSpring);
+                            var message = new BridgeActionModel {
+                                action = actionType.SPRING_SLIDER_TRANSLATE,
+                                content = JsonUtility.ToJson(spring)
+                            };
+                            instance.Logger.LogInfo("<CLIENT> sending SPRING_SLIDER_TRANSLATE");
+                            instance.communication.Lobby.SendBridgeAction(message);
+                        }
+                        
+                    }
+                }
+            }
+
+            [HarmonyPatch(typeof(Pistons), "ForceSliderRelease")]
+            public static class PistonSlideTranslatePatch {
+                public static void Prefix(
+                    ref float ___m_NormalizedSliderValueWhenStartMoving
+                ){
+                    if (!instance.clientEnabled) return;
+                    if (Pistons.m_SliderFollowingMouse){
+		            	float num = Pistons.m_SliderFollowingMouse.GetNormalizedValue() - ___m_NormalizedSliderValueWhenStartMoving;
+		            	if (!Mathf.Approximately(num, 0f)){
+                            var piston = new PistonProxy(Pistons.m_SliderFollowingMouse.m_Piston);
+                            var message = new BridgeActionModel {
+                                action = actionType.PISTON_SLIDER_TRANSLATE,
+                                content = JsonUtility.ToJson(piston)
+                            };
+                            instance.Logger.LogInfo("<CLIENT> sending SPRING_SLIDER_TRANSLATE");
+                            instance.communication.Lobby.SendBridgeAction(message);
+                        }
+                        
+                    }
+                }
+            }
+
         }
         Harmony harmony;
     }
@@ -433,7 +449,8 @@ namespace P2PMod
 	    PISTON_SLIDER_TRANSLATE,
 	    SPRING_SLIDER_TRANSLATE,
 	    SPLIT_JOINT,
-	    UNSPLIT_JOINT
+	    UNSPLIT_JOINT,
+        SYNC_LAYOUT
     }
     
     

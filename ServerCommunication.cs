@@ -19,6 +19,8 @@ public class ServerCommunication
 
     // Address used in code
     public string host => useLocalhost ? "localhost" : hostIP;
+
+    public string path = "";
     // Final server address
     public string server;
 
@@ -34,7 +36,7 @@ public class ServerCommunication
     public ServerCommunication(){}
 
     public void Init(){
-        server = "ws://" + host + ":" + port;
+        server = "ws://" + host + ":" + port + "/" + path;
         client = new WsClient(server);
 
         // Messaging
@@ -69,16 +71,28 @@ public class ServerCommunication
         var message = JsonUtility.FromJson<MessageModel>(msg);
 
         // Picking correct method for message handling
-        switch (message.method)
+        if (message.metadata == "server_closed"){
+            P2PMod.P2PMod.Disconnect();
+        }
+        switch (message.type)
         {
             case LobbyMessaging.Register:
                 Lobby.OnConnectedToServer?.Invoke();
                 break;
-            case LobbyMessaging.Echo:
-                Lobby.OnEchoMessage?.Invoke(JsonUtility.FromJson<EchoMessageModel>(message.message));
+            case LobbyMessaging.BridgeAction:
+                Lobby.OnBridgeAction?.Invoke(JsonUtility.FromJson<BridgeActionModel>(message.content));
+                break;
+            case LobbyMessaging.ConsoleMessage:
+                uConsole.Log(message.content);
+                break;
+            case LobbyMessaging.PopupMessage:
+                PopUpMessage.DisplayOkOnly(message.content, null);
+                break;
+            case LobbyMessaging.TopLeftMessage:
+                GameUI.ShowMessage(ScreenMessageLocation.TOP_LEFT, message.content, 3f);
                 break;
             default:
-                Debug.LogError("Unknown type of method: " + message.method);
+                Debug.LogError("Unknown type of method: " + message.type);
                 break;
         }
     }

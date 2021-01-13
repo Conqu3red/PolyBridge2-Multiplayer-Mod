@@ -1,11 +1,10 @@
-﻿using P2PMod;
+using P2PMod;
 /// <summary>
 /// Echo message model.
 /// </summary>
 [System.Serializable]
-public class EchoMessageModel
+public class BridgeActionModel
 {
-    public string text;
     public actionType action;
     public string content;
     public string metadata;

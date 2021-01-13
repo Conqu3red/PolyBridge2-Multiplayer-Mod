@@ -11,16 +11,17 @@ class ActionType:
     TRANSLATE_JOINT = 4
 
 message_template = {
-    "method":"echo",
-    "message":{
-        "text":"",
+    "type":"BridgeAction",
+    "content":{
         "action":ActionType.CREATE_JOINT,
         "content":""
     }
 }
 MODE = "listen" + "no"
 
-ws = create_connection("ws://127.0.0.1:8181")
+ws = create_connection("ws://127.0.0.1:8181/test?username=test_user")
+
+
 if MODE == "listen":
     while True:
         message = ws.recv()
@@ -51,9 +52,9 @@ def createEdge(m_NodeA_Guid, m_NodeB_Guid, m_Material=1):
 
 def send_action(content, action):
     message = deepcopy(message_template)
-    message["message"]["action"] = action
-    message["message"]["content"] = json.dumps(content)
-    message["message"] = json.dumps(message["message"])
+    message["content"]["action"] = action
+    message["content"]["content"] = json.dumps(content)
+    message["content"] = json.dumps(message["content"])
     ws.send(json.dumps(message))
     print(f"sent action {action}")
 
@@ -81,6 +82,7 @@ edge2 = createEdge(joint3["m_Guid"], joint4["m_Guid"], 4)
 send_action(edge2, ActionType.CREATE_EDGE)
 print("created metal")
 
+
 time.sleep(1)
 print("deleting metal")
 send_action(joint3, ActionType.DELETE_JOINT)
@@ -93,6 +95,8 @@ send_action(joint3, ActionType.CREATE_JOINT)
 joint4 = createJoint(3,9,0)
 send_action(joint4, ActionType.CREATE_JOINT)
 
+
+
 edge2 = createEdge(joint3["m_Guid"], joint4["m_Guid"], 4)
 send_action(edge2, ActionType.CREATE_EDGE)
 print("created metal 2")
@@ -100,3 +104,15 @@ time.sleep(1)
 joint4["m_Pos"]["x"] = 4
 send_action(joint4, ActionType.TRANSLATE_JOINT)
 print("translated joint of metal 2")
+
+
+print("spring/hydraulic test")
+joint1 = createJoint(0,10,0)
+send_action(joint1, ActionType.CREATE_JOINT)
+
+joint2 = createJoint(2,10,0)
+send_action(joint2, ActionType.CREATE_JOINT)
+
+edge1 = createEdge(joint1["m_Guid"], joint2["m_Guid"], 9)
+send_action(edge1, ActionType.CREATE_EDGE)
+print("created spring")
