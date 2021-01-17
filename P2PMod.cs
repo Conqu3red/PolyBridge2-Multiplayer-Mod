@@ -10,6 +10,7 @@ using BepInEx.Configuration;
 using PolyPhysics;
 using System.Net.WebSockets;
 using System.Threading;
+using UnityEngine.UI;
 
 namespace P2PMod
 {
@@ -34,6 +35,7 @@ namespace P2PMod
             username;
         public static P2PMod instance;
         public static string ClientName = "";
+        public static string serverName = "";
         public bool clientEnabled = false;
         public ServerCommunication communication;
 
@@ -56,10 +58,17 @@ namespace P2PMod
 
             PolyTechMain.registerMod(this);
             Logger.LogInfo("P2P MOD");
-            uConsole.RegisterCommand("name", new uConsole.DebugCommand(Name));
             uConsole.RegisterCommand("connect", new uConsole.DebugCommand(Connect));
             uConsole.RegisterCommand("disconnect", new uConsole.DebugCommand(Disconnect));
             uConsole.RegisterCommand("connection_info", new uConsole.DebugCommand(ConnectionInfo));
+            uConsole.RegisterCommand("accept_connections", new uConsole.DebugCommand(setAcceptConnections));
+            uConsole.RegisterCommand("set_password", new uConsole.DebugCommand(setPassword));
+            uConsole.RegisterCommand("set_user_cap", new uConsole.DebugCommand(setUserCap));
+            uConsole.RegisterCommand("set_lobby_mode", new uConsole.DebugCommand(setLobbyMode));
+
+
+            uConsole.RegisterCommand("kick","kick <username> <?reason>", new uConsole.DebugCommand(KickUser));
+
         }
 
         public void Update(){
@@ -76,6 +85,7 @@ namespace P2PMod
         }
         public void OnBridgeAction(BridgeActionModel message)
         {
+            // TODO: send joints/edges as a list so less packets need to be sent when bulk deleting etc
             BridgeEdgeProxy edgeProxy;
             BridgeEdge edge;
             BridgeSpringProxy springProxy;
@@ -157,41 +167,217 @@ namespace P2PMod
                     piston.m_Slider.SetNormalizedValue(pistonProxy.m_NormalizedValue);
                     piston.m_Slider.MakeVisible();
                     break;
+                case actionType.SPLIT_JOINT:
+                    jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
+                    joint.Split();
+                    joint.ResetJointSelectors();
+                    break;
+                case actionType.UNSPLIT_JOINT:
+                    jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
+                    joint.UnSplit();
+                    break;
+                case actionType.SPLIT_MODIFY:
+                    edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
+                    edge = BridgeEdges.FindEnabledEdgeByJointGuids(edgeProxy.m_NodeA_Guid, edgeProxy.m_NodeB_Guid, edgeProxy.m_Material);
+                    edge.m_JointAPart = edgeProxy.m_JointAPart;
+                    edge.m_JointBPart = edgeProxy.m_JointBPart;
+                    edge.RefreshJointSelectorNumbers();
+                    break;
+                case actionType.HYDRAULIC_CONTROLLER_ACTION:
+                    HydraulicsControllerActionModel content = JsonUtility.FromJson<HydraulicsControllerActionModel>(message.content);
+
+                    // figure out what phases we are applying this to
+                    List<HydraulicsControllerPhase> phases = new List<HydraulicsControllerPhase> ();
+                    if (content.doForEveryPhase) phases = HydraulicsController.m_ControllerPhases;
+                    else {
+                        HydraulicsPhase hydraulicsPhase = HydraulicsPhases.FindByGuid(content.phaseGuid);
+                        HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+                        phases.Add(hydraulicsControllerPhase);
+                        
+                    }
+                    if (content.phaseMustBeAcceptingAddidtions){
+                        List<HydraulicsControllerPhase> phases2 = new List<HydraulicsControllerPhase> ();
+                        foreach (var phase in phases){
+                            if (!phase.m_DisableNewAdditions) phases2.Add(phase);
+                        }
+                        phases = phases2;
+                    }
+
+                    if (content.action == HydraulicsControllerAction.SET_THREE_WAY_SPLIT_JOINT_TOGGLE_STATE){
+                        GameUI.m_Instance.m_HydraulicsController.m_ThreeWayJointsToggle.isOn = content.ThreeWaySplitJointToggleState;
+                        SandboxSettings.m_ThreeWaySplitJointsEnabled = GameUI.m_Instance.m_HydraulicsController.m_ThreeWayJointsToggle.isOn;
+	                    Profile.Save();
+                        break;
+                    }
+
+                    foreach (HydraulicsControllerPhase hydraulicsControllerPhase in phases){
+                        if (hydraulicsControllerPhase == null) continue;
+                        switch (content.action){
+                            case HydraulicsControllerAction.ADD_SPLIT_JOINT:
+                                if (content.doForEverySplitJoint){
+                                    foreach (BridgeJoint bridgeJoint in BridgeJoints.m_Joints)
+		                            {
+		                            	if (bridgeJoint.m_IsSplit && bridgeJoint.gameObject.activeInHierarchy)
+		                            	{
+		                            		if (!hydraulicsControllerPhase.AffectsSplitJoint(bridgeJoint))
+		                            		{
+		                            			hydraulicsControllerPhase.AddSplitJoint(bridgeJoint, SplitJointState.ALL_SPLIT);
+		                            		}
+		                            		else
+		                            		{
+		                            			hydraulicsControllerPhase.SetStateForJoint(bridgeJoint, SplitJointState.ALL_SPLIT);
+		                            		}
+		                            	}
+		                            }
+                                }
+                                else {
+                                    joint = BridgeJoints.FindByGuid(content.jointGuid);
+                                    hydraulicsControllerPhase.AddSplitJoint(joint, (joint.m_SplitJointState == SplitJointState.NONE_SPLIT) ? SplitJointState.ALL_SPLIT : joint.m_SplitJointState);
+                                }
+                                break;
+                            case HydraulicsControllerAction.REMOVE_SPLIT_JOINT:
+                                if (content.doForEverySplitJoint){
+                                    hydraulicsControllerPhase.RemoveAllSplitJoints();
+                                }
+                                else if (content.weirdRemoveFlagForJointBeingDestroyed){
+                                    joint = BridgeJoints.FindByGuid(content.jointGuid);
+                                    foreach (BridgeSplitJoint bridgeSplitJoint in hydraulicsControllerPhase.m_SplitJoints)
+			                        {
+			                        	if (bridgeSplitJoint.m_BridgeJoint == joint)
+			                        	{
+			                        		hydraulicsControllerPhase.m_SplitJoints.Remove(bridgeSplitJoint);
+			                        		break;
+			                        	}
+			                        }
+                                }
+                                else {
+                                    joint = BridgeJoints.FindByGuid(content.jointGuid);
+                                    hydraulicsControllerPhase.RemoveSplitJoint(joint);
+                                }
+                                break;
+                            case HydraulicsControllerAction.ADD_PISTON:
+                                if (content.doForEveryPiston){
+                                    foreach (Piston item in Pistons.m_Pistons)
+		                            {
+		                            	if (!hydraulicsControllerPhase.m_Pistons.Contains(item))
+		                            	{
+		                            		hydraulicsControllerPhase.m_Pistons.Add(item);
+		                            	}
+		                            }
+                                }
+                                else {
+                                    pistonProxy = JsonUtility.FromJson<PistonProxy>(content.pistonProxySerialized);
+                                    piston = Pistons.GetPistonOnEdge(BridgeEdges.FindEnabledEdgeByJointGuids(
+                                        pistonProxy.m_NodeA_Guid,
+                                        pistonProxy.m_NodeB_Guid,
+                                        BridgeMaterialType.HYDRAULICS
+                                    ));
+                                    if (!hydraulicsControllerPhase.m_Pistons.Contains(piston)){
+                                        hydraulicsControllerPhase.m_Pistons.Add(piston);
+                                    }
+                                }
+                                break;
+                            case HydraulicsControllerAction.REMOVE_PISTON:
+                                if (content.doForEveryPiston){
+                                    hydraulicsControllerPhase.m_Pistons.Clear();
+                                }
+                                else {
+                                    pistonProxy = JsonUtility.FromJson<PistonProxy>(content.pistonProxySerialized);
+                                    piston = Pistons.GetPistonOnEdge(BridgeEdges.FindEnabledEdgeByJointGuids(
+                                        pistonProxy.m_NodeA_Guid,
+                                        pistonProxy.m_NodeB_Guid,
+                                        BridgeMaterialType.HYDRAULICS
+                                    ));
+                                    if (hydraulicsControllerPhase.m_Pistons.Contains(piston)){
+                                        hydraulicsControllerPhase.m_Pistons.Remove(piston);
+                                    }
+                                }
+                                break;
+                            case HydraulicsControllerAction.SET_DISABLE_NEW_ADDITIONS:
+                                foreach (var phase in phases){
+                                    phase.m_DisableNewAdditions = content.DisableAdditonsState;
+                                }
+                                break;
+                            default:
+                                instance.Logger.LogError("Unrecognized Hydraulic controller action!");
+                                break;
+                            
+                        }
+                        if (hydraulicsControllerPhase != null && hydraulicsControllerPhase.m_HydraulicsPhase != null)
+		                {
+		                	EventStage stageWithUnit = EventTimelines.GetStageWithUnit(hydraulicsControllerPhase.m_HydraulicsPhase.gameObject);
+		                	if (stageWithUnit != null)
+		                	{
+		                		GameUI.m_Instance.m_HydraulicsController.m_Stages.EnableOffIconForStage(stageWithUnit, hydraulicsControllerPhase.m_DisableNewAdditions);
+		                	}
+		                }
+                    }
+                    break;
                 default:
                     instance.Logger.LogError("<CLIENT> recieved unexpected action");
                     break;
             }
             
         }
-        public static void Name(){
-            if (uConsole.GetNumParameters() == 1){
-                ClientName = uConsole.GetString();
-                uConsole.Log($"Set name to {ClientName}");
-                return;
+
+        public static Dictionary<string, string> getOptionalParams(List<string> parameters){
+            Dictionary<string, string> optional_params = new Dictionary<string, string>();
+            foreach (var p in parameters){
+                //instance.Logger.LogInfo(p);
+                string[] split = p.Split('=');
+                //instance.Logger.LogInfo($"{split[0].ToString()} {split[1].ToString()}");
+                optional_params[split[0].ToString()] = split[1].ToString();
             }
-            uConsole.Log($"Name is: {ClientName}");
-            
+            return optional_params;
         }
         public static void Connect(){
+            /*
+                Usage:
+                connect <host_ip> <port> <server_name>
+                optional:
+                password=<password>
+                invite=<invite>
+
+                Examples:
+                connect 127.0.0.1 8181 test
+                connect 127.0.0.1 8181 test password=abc123
+                connect 127.0.0.1 8181 test invite=52fc013e-bf9a-4859-ba3e-01e1531d7d03
+            */
+            
+
+
             if (instance.clientEnabled){
                 uConsole.Log("Already Connected to a server");
                 return;
             }
-            if (ClientName == ""){
-                uConsole.Log("You need to set a name using name <name>");
-                return;
-            }
+            
             if (uConsole.GetNumParameters() < 3){
-                uConsole.Log("Usage: Connect <host_ip> <port> <server_name>");
+                uConsole.Log("Usage (? signifies optional): Connect <host_ip> <port> <server_name> <?password>");
                 return;
             }
+            
+
             string hostIP = uConsole.GetString();
             int port = uConsole.GetInt();
-            string server_name = uConsole.GetString();
+            serverName = uConsole.GetString();
+            string password, invite;
+            ClientName = Workshop.GetLocalPlayerDisplayName();
+            string id = Workshop.GetLocalPlayerDisplayName();
+            List<string> parameters = uConsole.m_Instance.GetAllParameters();
+            parameters = parameters.GetRange(3, parameters.Count - 3);
+            Dictionary<string, string> optional_params = getOptionalParams(parameters);
+            
+            optional_params.TryGetValue("password", out password);
+            optional_params.TryGetValue("invite", out invite);
+
             instance.communication = new ServerCommunication();
             instance.communication.useLocalhost = false;
             instance.communication.hostIP = hostIP;
-            instance.communication.path = $"{server_name}?username={ClientName}";
+            instance.communication.path = $"{serverName}?username={ClientName}&id={id}";
+            if (password != null) instance.communication.path += $"&password={password}";
+            if (invite != null) instance.communication.path += $"&invite={invite}";
             instance.communication.port = port;
             instance.communication.Init();
             instance.communication.Lobby.OnConnectedToServer += instance.OnConnectedToServer;
@@ -205,11 +391,18 @@ namespace P2PMod
                 uConsole.Log("You aren't connected to anything.");
                 return;
             }
-            instance.communication.client.ws.CloseAsync(
-                WebSocketCloseStatus.NormalClosure,
-                "closed",
-                new CancellationToken()
-            );
+            try {
+                if (instance != null && instance.communication != null){
+                    instance.communication.client.ws.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "closed",
+                        new CancellationToken()
+                    );
+                }
+            }
+            catch {
+                
+            }
             instance.communication = null;
             uConsole.Log("Disabled Client");
             instance.clientEnabled = false;
@@ -217,7 +410,122 @@ namespace P2PMod
         public static void ConnectionInfo(){
             if (!instance.clientEnabled) return;
             uConsole.Log($"Connected to {instance.communication.hostIP}:{instance.communication.port}");
-            uConsole.Log($"Connected to server {instance.communication.path}");
+            uConsole.Log($"Connected to server {serverName}");
+            instance.communication.SendRequest(JsonUtility.ToJson(
+                new MessageModel {
+                    type = LobbyMessaging.ServerInfo
+                }
+            ));
+        }
+
+        public static void KickUser(){
+            if (!instance.clientEnabled){
+                uConsole.Log("You aren't connected to anything.");
+                return;
+            }
+            string username = uConsole.GetString();
+            var parameters = uConsole.m_Instance.GetAllParameters();
+            parameters.RemoveAt(0);
+            string reason = parameters.Join(null, " ");
+           
+            var content = new KickUserModel {
+                username = username,
+                reason = reason
+            };
+            var message = new MessageModel {
+                type = LobbyMessaging.KickUser,
+                content = JsonUtility.ToJson(content) 
+            };
+
+            
+            instance.communication.SendRequest(JsonUtility.ToJson(message));
+        }
+        public static void setPassword(){
+            if (!instance.clientEnabled){
+                uConsole.Log("You aren't connected to anything.");
+                return;
+            }
+            string password = uConsole.GetString();
+            var content = new SetPasswordModel {
+                newPassword = password
+            };
+            var message = new MessageModel {
+                type = LobbyMessaging.ServerConfig,
+                content = JsonUtility.ToJson(content) 
+            };
+            instance.communication.SendRequest(JsonUtility.ToJson(message));
+        }
+        public static void setUserCap(){
+            if (!instance.clientEnabled){
+                uConsole.Log("You aren't connected to anything.");
+                return;
+            }
+            int userCap = uConsole.GetInt();
+            var content = new SetUserCapModel {
+                userCap = userCap
+            };
+            var message = new MessageModel {
+                type = LobbyMessaging.ServerConfig,
+                content = JsonUtility.ToJson(content) 
+            };
+            instance.communication.SendRequest(JsonUtility.ToJson(message));
+        }
+        public static void setAcceptConnections(){
+            if (!instance.clientEnabled){
+                uConsole.Log("You aren't connected to anything.");
+                return;
+            }
+            bool acceptingConnections = uConsole.GetBool();
+            var content = new SetAcceptingConnectionsModel {
+                acceptingConnections = acceptingConnections
+            };
+            var message = new MessageModel {
+                type = LobbyMessaging.ServerConfig,
+                content = JsonUtility.ToJson(content) 
+            };
+            instance.communication.SendRequest(JsonUtility.ToJson(message));
+        }
+        public static void setLobbyMode(){
+            if (!instance.clientEnabled){
+                uConsole.Log("You aren't connected to anything.");
+                return;
+            }
+            if (uConsole.GetNumParameters() == 0) return;
+            string lobby_mode = uConsole.GetString().ToLower();
+            LobbyMode mode;
+            if (LobbyMode.TryParse(lobby_mode, true, out mode)){
+                uConsole.Log("Changing Mode...");
+            }
+            else {
+                uConsole.Log("Invalid Mode! Valid modes are: public, password, password_locked, invite_only");
+                return;
+            }
+
+            var content = new SetLobbyModeModel {
+                lobbyMode = mode
+            };
+            var message = new MessageModel {
+                type = LobbyMessaging.ServerConfig,
+                content = JsonUtility.ToJson(content) 
+            };
+            instance.communication.SendRequest(JsonUtility.ToJson(message));
+        }
+
+        public static void CreateInvite(){
+            if (!instance.clientEnabled){
+                uConsole.Log("You aren't connected to anything.");
+                return;
+            }
+            int uses;
+            uses = (uConsole.GetNumParameters() == 1) ? uConsole.GetInt() : 1;
+            var content = new CreateInviteModel {
+                uses = uses
+            };
+            var message = new MessageModel {
+                type = LobbyMessaging.ServerConfig,
+                content = JsonUtility.ToJson(content) 
+            };
+            instance.communication.SendRequest(JsonUtility.ToJson(message));
         }
 
         public void onEnableDisable(object sender, EventArgs e)
@@ -300,6 +608,7 @@ namespace P2PMod
                 if (!instance.clientEnabled) return;
                 instance.ClientRecieving.TryGetValue(actionType.CREATE_JOINT, out var ClientIsRecieving);
                 if (ClientIsRecieving) return;
+                if (Bridge.IsSimulating()) return;
                 var joint = new BridgeJointProxy(__result);
                 var message = new BridgeActionModel {
                     action = actionType.CREATE_JOINT,
@@ -437,6 +746,497 @@ namespace P2PMod
             }
 
         }
+
+        [HarmonyPatch(typeof(BridgeJointPlacement), "ProcessDoubleClickOnJoint")]
+        public static class SplitJointCreateDeletePatch {
+            public static void Prefix(BridgeJoint joint){
+                if (!instance.clientEnabled) return;
+                actionType action = actionType.SPLIT_JOINT;
+                if (joint.m_IsSplit)
+		        {
+		        	action = actionType.UNSPLIT_JOINT;
+                    instance.Logger.LogInfo("<CLIENT> sending UNSPLIT_JOINT");
+		        }
+		        else if (HydraulicsPhases.m_Phases.Count > 0)
+		        {
+		        	
+		        	action = actionType.SPLIT_JOINT;
+                    instance.Logger.LogInfo("<CLIENT> sending SPLIT_JOINT");
+		        }
+
+                var message = new BridgeActionModel {
+                    action = action,
+                    content = JsonUtility.ToJson(new BridgeJointProxy(joint))
+                };
+                
+                instance.communication.Lobby.SendBridgeAction(message);
+            }
+        }
+        [HarmonyPatch(typeof(BridgeJointSelector), "Cycle")]
+        public static class SplitJointChangeNumbersPatch {
+            public static void Postfix(bool forward, ref BridgeJointSelector __instance){
+                if (!instance.clientEnabled) return;
+                var edge = new BridgeEdgeProxy(__instance.m_Edge);
+                var message = new BridgeActionModel {
+                    action = actionType.SPLIT_MODIFY,
+                    content = JsonUtility.ToJson(edge)
+                };
+                
+                instance.communication.Lobby.SendBridgeAction(message);
+            }
+        }
+        // Hydraulic Controller Patches
+
+
+        [HarmonyPatch(typeof(HydraulicsController), "AddSplitJointToPhase")]
+        public static class AddSplitJointToPhasePatch {
+            public static void Postfix(BridgeJoint joint, HydraulicsPhase hydraulicsPhase)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.ADD_SPLIT_JOINT,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        jointGuid = joint.m_Guid
+
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddSplitJointToPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+        
+        [HarmonyPatch(typeof(HydraulicsController), "AddAllSplitJointsToPhase")]
+        public static class AddAllSplitJointsToPhasePatch {
+            public static void Postfix(HydraulicsPhase hydraulicsPhase)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.ADD_SPLIT_JOINT,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        doForEverySplitJoint = true
+
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddAllSplitJointsToPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "AddSplitJointToAllPhasesAcceptingNewAdditions")]
+        public static class AddSplitJointToAllPhasesAcceptingNewAdditionsPatch {
+            public static void Postfix(BridgeJoint joint)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                var content = new HydraulicsControllerActionModel {
+                    action = HydraulicsControllerAction.ADD_SPLIT_JOINT,
+                    jointGuid = joint.m_Guid,
+                    doForEveryPhase = true,
+                    phaseMustBeAcceptingAddidtions = true
+                };
+	            var message = new BridgeActionModel {
+                    action = action,
+                    content = JsonUtility.ToJson(content)
+                };
+                instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddSplitJointToAllPhasesAcceptingNewAdditions");
+                instance.communication.Lobby.SendBridgeAction(message);
+	            
+            }
+        } 
+        
+        [HarmonyPatch(typeof(HydraulicsController), "RemoveSplitJointFromPhase")]
+        public static class RemoveSplitJointFromPhasePatch {
+            public static void Postfix(BridgeJoint joint, HydraulicsPhase hydraulicsPhase)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.REMOVE_SPLIT_JOINT,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        jointGuid = joint.m_Guid
+
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveSplitJointFromPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+        [HarmonyPatch(typeof(HydraulicsController), "RemoveSplitJointFromAllPhases")]
+        public static class RemoveSplitJointFromAllPhasesPatch {
+            public static void Postfix(BridgeJoint joint)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                
+                var content = new HydraulicsControllerActionModel {
+                    action = HydraulicsControllerAction.REMOVE_SPLIT_JOINT,
+                    jointGuid = joint.m_Guid,
+                    doForEveryPhase = true
+
+                };
+	            var message = new BridgeActionModel {
+                    action = action,
+                    content = JsonUtility.ToJson(content)
+                };
+                instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveSplitJointFromAllPhases");
+                instance.communication.Lobby.SendBridgeAction(message);
+	            
+            }
+        }
+        
+        [HarmonyPatch(typeof(HydraulicsController), "RemoveJointFromAllPhases")]
+        public static class RemoveJointFromAllPhasesPatch {
+            public static void Postfix(BridgeJoint joint)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                
+                var content = new HydraulicsControllerActionModel {
+                    action = HydraulicsControllerAction.REMOVE_SPLIT_JOINT,
+                    jointGuid = joint.m_Guid,
+                    doForEveryPhase = true,
+                    weirdRemoveFlagForJointBeingDestroyed = true
+
+                };
+	            var message = new BridgeActionModel {
+                    action = action,
+                    content = JsonUtility.ToJson(content)
+                };
+                instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveJointFromAllPhases");
+                instance.communication.Lobby.SendBridgeAction(message);
+	            
+            }
+        }
+        
+        [HarmonyPatch(typeof(HydraulicsController), "RemoveAllSplitJointsFromPhase")]
+        public static class RemoveAllSplitJointsFromPhasePatch {
+            public static void Postfix(HydraulicsPhase hydraulicsPhase)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.REMOVE_SPLIT_JOINT,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        doForEverySplitJoint = true
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveSplitJointFromPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "SetSplitJointStateForPhase")]
+        public static class SetSplitJointStateForPhasePatch {
+            public static void Postfix(HydraulicsPhase hydraulicsPhase, BridgeJoint joint, SplitJointState state){
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.SET_SPLIT_JOINT_STATE,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        jointGuid = joint.m_Guid,
+                        splitJointState = state
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - SetSplitJointStateForPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "ToggleSplitJoint")]
+        public static class ToggleSplitJointPatch {
+            public static void Prefix(HydraulicsPhase hydraulicsPhase, BridgeJoint joint){
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    HydraulicsControllerAction internal_action;
+                    if (hydraulicsControllerPhase.AffectsSplitJoint(joint)) internal_action = HydraulicsControllerAction.REMOVE_SPLIT_JOINT;
+                    else internal_action = HydraulicsControllerAction.ADD_SPLIT_JOINT;
+                    var content = new HydraulicsControllerActionModel {
+                        action = internal_action,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        jointGuid = joint.m_Guid,
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - ToggleSplitJoint");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "AddPistonToHydraulicsPhase")]
+        public static class AddPistonToHydraulicsPhasePatch {
+            public static void Postfix(HydraulicsPhase hydraulicsPhase, Piston piston)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.ADD_PISTON,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        pistonProxySerialized = JsonUtility.ToJson(new PistonProxy(piston))
+
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddPistonToHydraulicsPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "AddAllPistonsToPhase")]
+        public static class AddAllPistonsToPhasePatch {
+            public static void Postfix(HydraulicsPhase hydraulicsPhase)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.ADD_PISTON,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        doForEveryPiston = true
+
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddAllPistonsToPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+	            
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "AddPistonToAllPhasesAcceptingNewAdditions")]
+        public static class AddPistonToAllPhasesAcceptingNewAdditionsPatch {
+            public static void Postfix(Piston piston)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                var content = new HydraulicsControllerActionModel {
+                    action = HydraulicsControllerAction.ADD_PISTON,
+                    pistonProxySerialized = JsonUtility.ToJson(new PistonProxy(piston)),
+                    doForEveryPhase = true,
+                    phaseMustBeAcceptingAddidtions = true
+
+                };
+	            var message = new BridgeActionModel {
+                    action = action,
+                    content = JsonUtility.ToJson(content)
+                };
+                instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddPistonToHydraulicsPhase");
+                instance.communication.Lobby.SendBridgeAction(message);
+	            
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "RemoveAllPistonsFromPhase")]
+        public static class RemoveAllPistonsFromPhasePatch {
+            public static void Postfix(HydraulicsPhase hydraulicsPhase)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.REMOVE_PISTON,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        doForEveryPiston = true
+
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveAllPistonsFromPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+	            
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "RemovePistonFromAllPhases")]
+        public static class RemovePistonFromAllPhasesPatch {
+            public static void Postfix(Piston piston)
+            {
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                
+                var content = new HydraulicsControllerActionModel {
+                    action = HydraulicsControllerAction.REMOVE_PISTON,
+                    pistonProxySerialized = JsonUtility.ToJson(new PistonProxy(piston))
+                };
+	            var message = new BridgeActionModel {
+                    action = action,
+                    content = JsonUtility.ToJson(content)
+                };
+                instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddPistonToHydraulicsPhase");
+                instance.communication.Lobby.SendBridgeAction(message);
+	            
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "TogglePiston")]
+        public static class TogglePistonPatch {
+            public static void Prefix(HydraulicsPhase hydraulicsPhase, Piston piston){
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    HydraulicsControllerAction internal_action;
+                    if (hydraulicsControllerPhase.m_Pistons.Contains(piston)) internal_action = HydraulicsControllerAction.REMOVE_PISTON;
+		            else internal_action = HydraulicsControllerAction.ADD_PISTON;
+                    
+                    var content = new HydraulicsControllerActionModel {
+                        action = internal_action,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        pistonProxySerialized = JsonUtility.ToJson(new PistonProxy(piston))
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - TogglePiston");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "DisableNewAdditionsFromPhase")]
+        public static class DisableNewAdditionsFromPhasePatch {
+            public static void Postfix(HydraulicsPhase hydraulicsPhase){
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.SET_DISABLE_NEW_ADDITIONS,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        DisableAdditonsState = true
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - DisableNewAdditionsFromPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+
+        [HarmonyPatch(typeof(HydraulicsController), "EnableNewAdditionsFromPhase")]
+        public static class EnableNewAdditionsFromPhasePatch {
+            public static void Postfix(HydraulicsPhase hydraulicsPhase){
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
+	            if (hydraulicsControllerPhase != null)
+	            {
+                    var content = new HydraulicsControllerActionModel {
+                        action = HydraulicsControllerAction.SET_DISABLE_NEW_ADDITIONS,
+                        phaseGuid = hydraulicsPhase.m_Guid,
+                        DisableAdditonsState = false
+                    };
+	            	var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(content)
+                    };
+                    instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - EnableNewAdditionsFromPhase");
+                    instance.communication.Lobby.SendBridgeAction(message);
+	            }
+            }
+        }
+
+        [HarmonyPatch(typeof(Panel_HydraulicsController), "OnThreeWayJointsToggle")]
+        public static class OnThreeWayJointsTogglePatch {
+            public static void Postfix(ref Panel_HydraulicsController __instance){
+                if (!instance.clientEnabled) return;
+                if (Bridge.IsSimulating()) return;
+                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+                var content = new HydraulicsControllerActionModel {
+                    action = HydraulicsControllerAction.SET_THREE_WAY_SPLIT_JOINT_TOGGLE_STATE,
+                    ThreeWaySplitJointToggleState = __instance.m_ThreeWayJointsToggle.isOn
+                };
+                var message = new BridgeActionModel {
+                    action = action,
+                    content = JsonUtility.ToJson(content)
+                };
+                instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - OnThreeWayJointsToggle");
+                instance.communication.Lobby.SendBridgeAction(message);
+            }
+        }
+
         Harmony harmony;
     }
 
@@ -450,7 +1250,35 @@ namespace P2PMod
 	    SPRING_SLIDER_TRANSLATE,
 	    SPLIT_JOINT,
 	    UNSPLIT_JOINT,
+        SPLIT_MODIFY,
+        HYDRAULIC_CONTROLLER_ACTION,
         SYNC_LAYOUT
+    }
+    public enum HydraulicsControllerAction {
+        ADD_SPLIT_JOINT,
+        REMOVE_SPLIT_JOINT,
+        SET_SPLIT_JOINT_STATE,
+        ADD_PISTON,
+        REMOVE_PISTON,
+        SET_DISABLE_NEW_ADDITIONS,
+        SET_THREE_WAY_SPLIT_JOINT_TOGGLE_STATE,
+        //ADD_PHASE,
+        //REMOVE_PHASE
+    }
+    [System.Serializable]
+    public class HydraulicsControllerActionModel {
+        public HydraulicsControllerAction action;
+        public string phaseGuid;
+        public string jointGuid;
+        public string pistonProxySerialized;
+        public SplitJointState splitJointState;
+        public bool ThreeWaySplitJointToggleState = false;
+        public bool doForEveryPhase = false;
+        public bool phaseMustBeAcceptingAddidtions = false;
+        public bool doForEverySplitJoint = false;
+        public bool doForEveryPiston = false;
+        public bool DisableAdditonsState = false;
+        public bool weirdRemoveFlagForJointBeingDestroyed = false;
     }
     
     

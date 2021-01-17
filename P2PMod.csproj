@@ -24,6 +24,9 @@
 		<Reference Include="UnityEngine">
 			<HintPath>../Poly Bridge 2/Poly Bridge 2_Data/Managed/UnityEngine.dll</HintPath>
 		</Reference>
+        <Reference Include="UnityEngine.UI">
+			<HintPath>../Poly Bridge 2/Poly Bridge 2_Data/Managed/UnityEngine.UI.dll</HintPath>
+		</Reference>
 		<Reference Include="UnityEngine.CoreModule">
 			<HintPath>../Poly Bridge 2/Poly Bridge 2_Data/Managed/UnityEngine.CoreModule.dll</HintPath>
 		</Reference>
@@ -41,9 +44,6 @@
         </Reference>
         <Reference Include="UnityEngine.JSONSerializeModule">
             <HintPath>../Poly Bridge 2/Poly Bridge 2_Data/Managed/UnityEngine.JSONSerializeModule.dll</HintPath>
-        </Reference>
-        <Reference Include="Fleck">
-            <HintPath>../Poly Bridge 2/Poly Bridge 2_Data/Managed/Fleck.dll</HintPath>
         </Reference>
         <Reference Include="ConsoleMod">
             <HintPath>../Poly Bridge 2/BepInEx/plugins/ConsoleMod.dll</HintPath>

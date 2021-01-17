@@ -9,6 +9,11 @@ class ActionType:
     DELETE_EDGE = 2
     DELETE_JOINT = 3
     TRANSLATE_JOINT = 4
+    PISTON_SLIDER_TRANSLATE = 5
+    SPRING_SLIDER_TRANSLATE = 6
+    SPLIT_JOINT = 7
+    UNSPLIT_JOINT = 8
+    SYNC_LAYOUT = 9
 
 message_template = {
     "type":"BridgeAction",
@@ -105,7 +110,6 @@ joint4["m_Pos"]["x"] = 4
 send_action(joint4, ActionType.TRANSLATE_JOINT)
 print("translated joint of metal 2")
 
-
 print("spring/hydraulic test")
 joint1 = createJoint(0,10,0)
 send_action(joint1, ActionType.CREATE_JOINT)
@@ -116,3 +120,7 @@ send_action(joint2, ActionType.CREATE_JOINT)
 edge1 = createEdge(joint1["m_Guid"], joint2["m_Guid"], 9)
 send_action(edge1, ActionType.CREATE_EDGE)
 print("created spring")
+
+print("split joint test")
+print("split")
+send_action(joint1, ActionType.SPLIT_JOINT)

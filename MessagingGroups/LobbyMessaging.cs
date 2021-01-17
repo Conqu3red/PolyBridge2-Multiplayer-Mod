@@ -19,12 +19,23 @@ public class LobbyMessaging : BaseMessaging
 
     // Bridge action messages
 
-    public const string BridgeAction = "BridgeAction";
+    //public const string BridgeAction = "BridgeAction";
     public UnityAction<BridgeActionModel> OnBridgeAction;
 
-    public const string ConsoleMessage = "ConsoleMessage";
+    // Bridge
+    public const string BridgeAction = "BridgeAction";
+    
+    // popups and messages
     public const string PopupMessage = "PopupMessage";
+    public const string ConsoleMessage = "ConsoleMessage";
     public const string TopLeftMessage = "TopLeftMessage";
+
+    // owner/config management
+    public const string ServerConfig = "ServerConfig";
+    public const string ServerInfo = "ServerInfo";
+    public const string KickUser = "KickUser";
+    public const string BanUser = "BanUser";
+    public const string CreateInvite = "CreateInvite";
 
 
     /// <summary>
@@ -33,6 +44,7 @@ public class LobbyMessaging : BaseMessaging
     /// <param name="request">Request.</param>
     public void SendBridgeAction(BridgeActionModel request)
     {
+
         var message = new MessageModel
         {
             type = BridgeAction,
