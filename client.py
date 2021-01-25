@@ -25,6 +25,8 @@ message_template = {
 MODE = "listen" + "no"
 
 ws = create_connection("ws://127.0.0.1:8181/test?username=test_user")
+ws2 = create_connection("ws://127.0.0.1:8181/test?username=test_user")
+
 
 
 if MODE == "listen":

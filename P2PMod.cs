@@ -43,6 +43,7 @@ namespace P2PMod
         
         void Awake()
         {
+            this.repositoryUrl = "https://github.com/Conqu3red/PolyBridge2-Multiplayer-Mod/";
 			if (instance == null) instance = this;
             // Use this if you wish to make the mod trigger cheat mode ingame.
             // Set this true if your mod effects physics or allows mods that you can't normally do.
@@ -98,6 +99,18 @@ namespace P2PMod
                     instance.ClientRecieving[actionType.CREATE_EDGE] = true;
                     edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
                     //BridgeEdges.CreateEdgeFromProxy(edgeProxy);
+
+                    edge = BridgeEdges.FindDisabledEdgeByJointGuids(
+                        edgeProxy.m_NodeA_Guid, 
+                        edgeProxy.m_NodeB_Guid, 
+                        edgeProxy.m_Material
+                    );
+		            if (edge){
+		            	edge.ForceEnable();
+		            	edge.RefreshJointSelectorNumbers();
+		            	break;
+		            }
+
                     BridgeEdge edgeFromJoints = BridgeEdges.GetEdgeFromJoints(
                         BridgeJoints.FindByGuid(edgeProxy.m_NodeA_Guid),
                         BridgeJoints.FindByGuid(edgeProxy.m_NodeB_Guid)
@@ -125,14 +138,22 @@ namespace P2PMod
                 case actionType.CREATE_JOINT:
                     instance.ClientRecieving[actionType.CREATE_JOINT] = true;
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
+	                if (joint)
+	                {
+	                	joint.gameObject.SetActive(true);
+	                	break;
+	                }
                     BridgeJoints.CreateJointFromProxy(jointProxy);
                     instance.ClientRecieving[actionType.CREATE_JOINT] = false;
                     break;
                 case actionType.DELETE_EDGE:
                     edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
                     edge = BridgeEdges.FindEnabledEdgeByJointGuids(edgeProxy.m_NodeA_Guid, edgeProxy.m_NodeB_Guid, edgeProxy.m_Material);
-                    edge.ForceDisable();
-                    edge.SetStressColor(0f);
+                    if (edge){
+                        edge.ForceDisable();
+                        edge.SetStressColor(0f);
+                    }
                     break;
                 case actionType.DELETE_JOINT:
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
@@ -141,9 +162,10 @@ namespace P2PMod
                     break;
                 case actionType.TRANSLATE_JOINT:
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
-                    BridgeJointMovement.m_SelectedJoint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
-                    BridgeJointMovement.m_SelectedJoint.transform.position = jointProxy.m_Pos;
-                    BridgeJointMovement.FinalizeMovement();
+                    joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
+                    joint.transform.position = jointProxy.m_Pos;
+                    joint.m_BuildPos = joint.transform.position;
+                    joint.TryRecreateSpringVisualizationForAttachedEdges();
                     break;
                 case actionType.SPRING_SLIDER_TRANSLATE:
                     springProxy = JsonUtility.FromJson<BridgeSpringProxy>(message.content);
@@ -170,13 +192,17 @@ namespace P2PMod
                 case actionType.SPLIT_JOINT:
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
+                    instance.ClientRecieving[actionType.SPLIT_JOINT] = true;
                     joint.Split();
                     joint.ResetJointSelectors();
+                    instance.ClientRecieving[actionType.SPLIT_JOINT] = false;
                     break;
                 case actionType.UNSPLIT_JOINT:
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    instance.ClientRecieving[actionType.UNSPLIT_JOINT] = true;
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
                     joint.UnSplit();
+                    instance.ClientRecieving[actionType.UNSPLIT_JOINT] = false;
                     break;
                 case actionType.SPLIT_MODIFY:
                     edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
@@ -187,7 +213,7 @@ namespace P2PMod
                     break;
                 case actionType.HYDRAULIC_CONTROLLER_ACTION:
                     HydraulicsControllerActionModel content = JsonUtility.FromJson<HydraulicsControllerActionModel>(message.content);
-
+                    instance.Logger.LogInfo("- " + content.action.ToString());
                     // figure out what phases we are applying this to
                     List<HydraulicsControllerPhase> phases = new List<HydraulicsControllerPhase> ();
                     if (content.doForEveryPhase) phases = HydraulicsController.m_ControllerPhases;
@@ -197,7 +223,7 @@ namespace P2PMod
                         phases.Add(hydraulicsControllerPhase);
                         
                     }
-                    if (content.phaseMustBeAcceptingAddidtions){
+                    if (content.phaseMustBeAcceptingAdditions){
                         List<HydraulicsControllerPhase> phases2 = new List<HydraulicsControllerPhase> ();
                         foreach (var phase in phases){
                             if (!phase.m_DisableNewAdditions) phases2.Add(phase);
@@ -300,15 +326,19 @@ namespace P2PMod
                                     phase.m_DisableNewAdditions = content.DisableAdditonsState;
                                 }
                                 break;
+                            case HydraulicsControllerAction.SET_SPLIT_JOINT_STATE:
+                                joint = BridgeJoints.FindByGuid(content.jointGuid);
+	                            hydraulicsControllerPhase.SetStateForJoint(joint, content.splitJointState);
+                                break;
                             default:
-                                instance.Logger.LogError("Unrecognized Hydraulic controller action!");
+                                instance.Logger.LogError("Unrecognized Hydraulic controller action! " + content.action.ToString());
                                 break;
                             
                         }
                         if (hydraulicsControllerPhase != null && hydraulicsControllerPhase.m_HydraulicsPhase != null)
 		                {
 		                	EventStage stageWithUnit = EventTimelines.GetStageWithUnit(hydraulicsControllerPhase.m_HydraulicsPhase.gameObject);
-		                	if (stageWithUnit != null)
+		                	if (stageWithUnit != null && GameUI.m_Instance.m_HydraulicsController.isActiveAndEnabled)
 		                	{
 		                		GameUI.m_Instance.m_HydraulicsController.m_Stages.EnableOffIconForStage(stageWithUnit, hydraulicsControllerPhase.m_DisableNewAdditions);
 		                	}
@@ -364,7 +394,7 @@ namespace P2PMod
             serverName = uConsole.GetString();
             string password, invite;
             ClientName = Workshop.GetLocalPlayerDisplayName();
-            string id = Workshop.GetLocalPlayerDisplayName();
+            string id = Workshop.GetLocalPlayerId();
             List<string> parameters = uConsole.m_Instance.GetAllParameters();
             parameters = parameters.GetRange(3, parameters.Count - 3);
             Dictionary<string, string> optional_params = getOptionalParams(parameters);
@@ -846,12 +876,14 @@ namespace P2PMod
             {
                 if (!instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
+                instance.ClientRecieving.TryGetValue(actionType.SPLIT_JOINT, out var ClientIsRecieving);
+                if (ClientIsRecieving) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 var content = new HydraulicsControllerActionModel {
                     action = HydraulicsControllerAction.ADD_SPLIT_JOINT,
                     jointGuid = joint.m_Guid,
                     doForEveryPhase = true,
-                    phaseMustBeAcceptingAddidtions = true
+                    phaseMustBeAcceptingAdditions = true
                 };
 	            var message = new BridgeActionModel {
                     action = action,
@@ -894,6 +926,8 @@ namespace P2PMod
             {
                 if (!instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
+                instance.ClientRecieving.TryGetValue(actionType.UNSPLIT_JOINT, out var ClientIsRecieving);
+                if (ClientIsRecieving) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 
                 var content = new HydraulicsControllerActionModel {
@@ -912,30 +946,29 @@ namespace P2PMod
             }
         }
         
-        [HarmonyPatch(typeof(HydraulicsController), "RemoveJointFromAllPhases")]
-        public static class RemoveJointFromAllPhasesPatch {
-            public static void Postfix(BridgeJoint joint)
-            {
-                if (!instance.clientEnabled) return;
-                if (Bridge.IsSimulating()) return;
-                actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
-                
-                var content = new HydraulicsControllerActionModel {
-                    action = HydraulicsControllerAction.REMOVE_SPLIT_JOINT,
-                    jointGuid = joint.m_Guid,
-                    doForEveryPhase = true,
-                    weirdRemoveFlagForJointBeingDestroyed = true
-
-                };
-	            var message = new BridgeActionModel {
-                    action = action,
-                    content = JsonUtility.ToJson(content)
-                };
-                instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveJointFromAllPhases");
-                instance.communication.Lobby.SendBridgeAction(message);
-	            
-            }
-        }
+        //[HarmonyPatch(typeof(HydraulicsController), "RemoveJointFromAllPhases")]
+        //public static class RemoveJointFromAllPhasesPatch {
+        //    public static void Postfix(BridgeJoint joint)
+        //    {
+        //        if (!instance.clientEnabled) return;
+        //        if (Bridge.IsSimulating()) return;
+        //        actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
+        //        
+        //        var content = new HydraulicsControllerActionModel {
+        //            action = HydraulicsControllerAction.REMOVE_SPLIT_JOINT,
+        //            jointGuid = joint.m_Guid,
+        //            doForEveryPhase = true,
+        //            weirdRemoveFlagForJointBeingDestroyed = true
+        //        };
+	    //        var message = new BridgeActionModel {
+        //            action = action,
+        //            content = JsonUtility.ToJson(content)
+        //        };
+        //        instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveJointFromAllPhases");
+        //        instance.communication.Lobby.SendBridgeAction(message);
+	    //        
+        //    }
+        //}
         
         [HarmonyPatch(typeof(HydraulicsController), "RemoveAllSplitJointsFromPhase")]
         public static class RemoveAllSplitJointsFromPhasePatch {
@@ -967,6 +1000,10 @@ namespace P2PMod
             public static void Postfix(HydraulicsPhase hydraulicsPhase, BridgeJoint joint, SplitJointState state){
                 if (!instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
+                instance.ClientRecieving.TryGetValue(actionType.SPLIT_JOINT, out var ClientIsRecieving);
+                if (ClientIsRecieving) return;
+                instance.ClientRecieving.TryGetValue(actionType.UNSPLIT_JOINT, out ClientIsRecieving);
+                if (ClientIsRecieving) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
 	            if (hydraulicsControllerPhase != null)
@@ -1079,7 +1116,7 @@ namespace P2PMod
                     action = HydraulicsControllerAction.ADD_PISTON,
                     pistonProxySerialized = JsonUtility.ToJson(new PistonProxy(piston)),
                     doForEveryPhase = true,
-                    phaseMustBeAcceptingAddidtions = true
+                    phaseMustBeAcceptingAdditions = true
 
                 };
 	            var message = new BridgeActionModel {
@@ -1237,6 +1274,146 @@ namespace P2PMod
             }
         }
 
+        // COPY/CUT/PASTE SUPPORT
+        [HarmonyPatch(typeof(ClipboardManager), "MaybeSplitPastedJoint")]
+        public static class MaybeSplitPastedJointPatch {
+            public static void Postfix(BridgeJoint pastedJoint, BridgeJoint sourceJoint){
+                if (!instance.clientEnabled) return;
+                actionType action = actionType.SPLIT_JOINT;
+                
+                if (pastedJoint && pastedJoint.m_IsSplit)
+		        {
+                    var message = new BridgeActionModel {
+                        action = action,
+                        content = JsonUtility.ToJson(new BridgeJointProxy(pastedJoint))
+                    };
+                    instance.communication.Lobby.SendBridgeAction(message);
+                }
+                
+            }
+        }
+
+        [HarmonyPatch]
+        public static class UndoPatch {
+            static IEnumerable<MethodBase> TargetMethods()
+            {
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoCreateEdge");
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoCreateJoint");
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoDeleteEdge");
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoDeleteJoint");
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoSplitJoint");
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoUnSplitJoint");
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoTranslateJoint");
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoTranslatePistonSlider");
+                yield return AccessTools.Method(typeof(BridgeUndo), "UndoTranslateSpringSlider");
+            }
+            public static void Postfix(BridgeActionPacket packet, MethodBase __originalMethod){
+                actionType action;
+                switch (__originalMethod.Name){
+                    case "UndoCreateEdge": action = actionType.CREATE_EDGE; break;
+                    case "UndoCreateJoint": action = actionType.CREATE_JOINT; break;
+                    case "UndoDeleteEdge": action = actionType.DELETE_EDGE; break;
+                    case "UndoDeleteJoint": action = actionType.DELETE_JOINT; break;
+                    case "UndoSplitJoint": action = actionType.SPLIT_JOINT; break;
+                    case "UndoUnSplitJoint": action = actionType.UNSPLIT_JOINT; break;
+                    case "UndoTranslateJoint": action = actionType.TRANSLATE_JOINT; break;
+                    case "UndoTranslatePistonSlider": action = actionType.PISTON_SLIDER_TRANSLATE; break;
+                    case "UndoTranslateSpringSlider": action = actionType.SPRING_SLIDER_TRANSLATE; break;
+                    default:
+                        instance.Logger.LogError($"Invalid Undo action detected from {__originalMethod.Name}");
+                        return;
+                }
+                processUndo(action, packet);
+            }
+        }
+
+        [HarmonyPatch]
+        public static class RedoPatch {
+            static IEnumerable<MethodBase> TargetMethods()
+            {
+                yield return AccessTools.Method(typeof(BridgeRedo), "RedoTranslateJoint");
+                yield return AccessTools.Method(typeof(BridgeRedo), "RedoTranslatePistonSlider");
+                yield return AccessTools.Method(typeof(BridgeRedo), "RedoTranslateSpringSlider");
+            }
+            public static void Postfix(BridgeActionPacket packet, MethodBase __originalMethod){
+                actionType action;
+                switch (__originalMethod.Name){
+                    case "RedoTranslateJoint": action = actionType.TRANSLATE_JOINT; break;
+                    case "RedoTranslatePistonSlider": action = actionType.PISTON_SLIDER_TRANSLATE; break;
+                    case "RedoTranslateSpringSlider": action = actionType.SPRING_SLIDER_TRANSLATE; break;
+                    default:
+                        instance.Logger.LogError($"Invalid Redo action detected from {__originalMethod.Name}");
+                        return;
+                }
+                processUndo(action, packet);
+            }
+        }
+        
+        
+        public static void processUndo(
+            actionType action,
+            BridgeActionPacket packet
+        ){
+            var message = new BridgeActionModel {
+            };
+            switch (action){
+                case actionType.CREATE_EDGE:
+                    message.action = actionType.DELETE_EDGE;
+                    message.content = JsonUtility.ToJson(packet.m_Edge);
+                    break;
+                
+                case actionType.CREATE_JOINT:
+                    message.action = actionType.DELETE_JOINT;
+                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    break;
+                
+                case actionType.DELETE_EDGE:
+                    message.action = actionType.CREATE_EDGE;
+                    message.content = JsonUtility.ToJson(packet.m_Edge);
+                    break;
+                
+                case actionType.DELETE_JOINT:
+                    message.action = actionType.CREATE_JOINT;
+                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    break;
+                
+                case actionType.SPLIT_JOINT:
+                    message.action = actionType.UNSPLIT_JOINT;
+                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    break;
+
+                case actionType.UNSPLIT_JOINT:
+                    message.action = actionType.SPLIT_JOINT;
+                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    break;
+                
+                case actionType.TRANSLATE_JOINT:
+                    message.action = actionType.TRANSLATE_JOINT;
+                    packet.m_Joint.m_Pos = BridgeJoints.FindByGuid(packet.m_Joint.m_Guid).m_BuildPos;
+                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    break;
+                
+                case actionType.PISTON_SLIDER_TRANSLATE:
+                    message.action = actionType.PISTON_SLIDER_TRANSLATE;
+                    Piston piston = Pistons.FindByGuid(packet.m_Piston.m_Guid);
+                    packet.m_Piston.m_NormalizedValue = piston.m_Slider.GetNormalizedValue();
+                    message.content = JsonUtility.ToJson(packet.m_Piston);
+                    break;
+                
+                case actionType.SPRING_SLIDER_TRANSLATE:
+                    message.action = actionType.SPRING_SLIDER_TRANSLATE;
+                    BridgeSpring spring = BridgeSprings.FindByGuid(packet.m_Spring.m_Guid);
+                    packet.m_Spring.m_NormalizedValue = spring.m_Slider.GetNormalizedValue();
+                    message.content = JsonUtility.ToJson(packet.m_Spring);
+                    break;
+                default:
+                    instance.Logger.LogError($"Invalid undo action - {action}");
+                    return;
+            }
+            instance.Logger.LogInfo($"<CLIENT> sending {message.action} - UndoHandle");
+            instance.communication.Lobby.SendBridgeAction(message);
+        }
+
         Harmony harmony;
     }
 
@@ -1274,7 +1451,7 @@ namespace P2PMod
         public SplitJointState splitJointState;
         public bool ThreeWaySplitJointToggleState = false;
         public bool doForEveryPhase = false;
-        public bool phaseMustBeAcceptingAddidtions = false;
+        public bool phaseMustBeAcceptingAdditions = false;
         public bool doForEverySplitJoint = false;
         public bool doForEveryPiston = false;
         public bool DisableAdditonsState = false;

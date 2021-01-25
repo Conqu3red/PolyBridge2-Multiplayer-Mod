@@ -67,6 +67,7 @@ class MultiplayerServer(WebSocket):
         parameters = dict(parse.parse_qsl(parse.urlsplit(self.request.path).query))
         username = parameters.get("username")
         server = open_lobbies[server_name]
+        print(self.data)
         if server:
             if self not in list(server.clients.values()): return
             try:
@@ -121,9 +122,12 @@ class MultiplayerServer(WebSocket):
             if message["type"] == MessageType.BridgeAction:
                 action_content = json.loads(message["content"])
                 #server.print(action_content)
-                for client in list(server.clients.values()):
+                for name, client in server.clients.items():
                     if client != self:
+                        print(f"sending to {name}")
                         client.send_message(self.data)
+                    else:
+                        print(f"packet was sent by {name}")
    
     def connected(self):
         try:

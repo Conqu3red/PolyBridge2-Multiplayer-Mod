@@ -6,7 +6,7 @@
 ## Remove
 - [x] `RemoveSplitJointFromPhase`
 - [x] `RemoveSplitJointFromAllPhases`
-- [x] `RemoveJointFromAllPhases`
+- [x] `RemoveJointFromAllPhases` - was not needed - caused end simulation bug
 - [x] `RemoveAllSplitJointsFromPhase`
 
 ## Other

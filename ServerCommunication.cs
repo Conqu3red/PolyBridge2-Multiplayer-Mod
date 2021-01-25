@@ -51,6 +51,7 @@ public class ServerCommunication
         // Check if server send new messages
         var cqueue = client.receiveQueue;
         string msg;
+        if (Bridge.IsSimulating()) return;
         while (cqueue.TryPeek(out msg))
         {
             // Parse newly received messages
