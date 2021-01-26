@@ -5,6 +5,7 @@ import uuid
 import signal
 import traceback
 from hashlib import sha256
+import socket
 class MessageType:
     # Bridge
     BridgeAction = "BridgeAction"
@@ -242,6 +243,8 @@ class MultiplayerServer(WebSocket):
 
 
 open_lobbies = {}
-
-server = WebSocketServer('127.0.0.1', 8181, MultiplayerServer)
+address = socket.gethostbyname(socket.gethostname())
+port = 11000
+print(f"Running at {address}:{port}")
+server = WebSocketServer(address, port, MultiplayerServer)
 server.serve_forever()
