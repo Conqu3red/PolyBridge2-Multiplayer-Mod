@@ -7,5 +7,6 @@ public class BridgeActionModel
 {
     public actionType action;
     public string content;
+    public string username;
     public string metadata;
 }

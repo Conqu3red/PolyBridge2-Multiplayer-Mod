@@ -11,6 +11,7 @@ using PolyPhysics;
 using System.Net.WebSockets;
 using System.Threading;
 using UnityEngine.UI;
+using System.IO;
 
 namespace P2PMod
 {
@@ -30,16 +31,21 @@ namespace P2PMod
         public static ConfigDefinition
             modEnabledDef = new ConfigDefinition("P2P Mod", "Enable/Disable Mod");
         public static ConfigEntry<bool>
-            modEnabled;
-        public static ConfigEntry<string>
-            username;
+            modEnabled,
+            logActions;
+        public static ConfigEntry<float>
+            backupFrequency,
+            writeToLogFrequency;
         public static P2PMod instance;
         public static string ClientName = "";
         public static string serverName = "";
         public bool clientEnabled = false;
+        public bool preventSendActions = false;
         public ServerCommunication communication;
-
         public Dictionary<actionType, bool> ClientRecieving = new Dictionary<actionType, bool> {};
+        public System.Timers.Timer BackupTimer = new System.Timers.Timer();
+        public List<string> logBuffer = new List<string> ();
+        public string backupFolder = "MultiplayerBackups";
         
         void Awake()
         {
@@ -50,9 +56,23 @@ namespace P2PMod
             isCheat = false;
            
             modEnabled = Config.Bind(modEnabledDef, true, new ConfigDescription("Enable Mod"));
-            username = Config.Bind("P2P Mod", "username", "name");
+            logActions = Config.Bind("P2P Mod", "Log Actions (only logs if you are host)", false);
+            backupFrequency = Config.Bind("P2P Mod", "Backup Frequency (seconds)", 60f);
+            writeToLogFrequency = Config.Bind("P2P Mod", "Save to action log every amount of lines", 100f);
+            
+            BackupTimer.Elapsed += (sender, args) => { backupLayout(); };
+            BackupTimer.AutoReset = true;
+            BackupTimer.Interval = backupFrequency.Value*1000;
+            BackupTimer.Start();
 
             modEnabled.SettingChanged += onEnableDisable;
+            backupFrequency.SettingChanged += (object sender, EventArgs e) => {
+                if (backupFrequency.Value < 5){
+                    backupFrequency.Value = 5;
+                }
+                BackupTimer.Interval = backupFrequency.Value*1000;
+            };
+
 
             harmony = new Harmony("org.bepinex.plugins.P2PMod");
             harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -66,10 +86,10 @@ namespace P2PMod
             uConsole.RegisterCommand("set_password", new uConsole.DebugCommand(setPassword));
             uConsole.RegisterCommand("set_user_cap", new uConsole.DebugCommand(setUserCap));
             uConsole.RegisterCommand("set_lobby_mode", new uConsole.DebugCommand(setLobbyMode));
+            uConsole.RegisterCommand("sync_layout", new uConsole.DebugCommand(syncLayout));
 
 
             uConsole.RegisterCommand("kick","kick <username> <?reason>", new uConsole.DebugCommand(KickUser));
-
         }
 
         public void Update(){
@@ -94,6 +114,14 @@ namespace P2PMod
             BridgeJointProxy jointProxy;
             BridgeJoint joint;
             instance.Logger.LogInfo($"<CLIENT> received {message.action}");
+            
+            
+            if (instance.communication.isOwner) {
+                ActionLog($"Recieved {message.action} from user {message.username}");
+            }
+            
+            
+            // swtich to handle actions
             switch (message.action){
                 case actionType.CREATE_EDGE:
                     instance.ClientRecieving[actionType.CREATE_EDGE] = true;
@@ -345,6 +373,34 @@ namespace P2PMod
 		                }
                     }
                     break;
+                case actionType.SYNC_LAYOUT:
+                    SyncLayoutModel layout = new SyncLayoutModel();
+                    BridgeActionModel _message = new BridgeActionModel { action = actionType.SYNC_LAYOUT };
+
+                    if (instance.communication.isOwner){
+                        instance.Logger.LogInfo("sending layout as requested");
+                        layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
+                        _message.content = JsonUtility.ToJson(layout);
+                        instance.communication.Lobby.SendBridgeAction(_message);
+                        break;
+                    }
+                    layout = JsonUtility.FromJson<SyncLayoutModel>(message.content);
+                    preventSendActions = true;
+                    int num = 0;
+			        var result = new SandboxLayoutData(layout.layoutData, ref num);
+                    Sandbox.Clear();
+                    Sandbox.Load(result.m_ThemeStubKey, result, true);
+                    SandboxUndo.Clear();
+		            SandboxUndo.SnapShot();
+		            PointsOfView.OnLayoutLoaded();
+		            if (GameStateManager.GetState() == GameState.BUILD)
+		            {
+		            	GameStateBuild.SetWaterProperties();
+		            	GameStateBuild.SetOverrideColorsForBuildMode();
+		            }
+                    preventSendActions = false;
+                    PopUpMessage.DisplayOkOnly("The host has synced their layout with you", null);
+                    break;
                 default:
                     instance.Logger.LogError("<CLIENT> recieved unexpected action");
                     break;
@@ -362,6 +418,53 @@ namespace P2PMod
             }
             return optional_params;
         }
+
+
+        
+
+        public static void ActionLog(string message){
+            string logItem;
+            if (!logActions.Value) return;
+            if (instance.logBuffer.Count >= 100){
+                string path = Path.Combine(SandboxLayout.GetSavePath(), instance.backupFolder);
+                if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+                path = Path.Combine(path, instance.communication.logFileName);
+                if (!File.Exists(path))
+                {
+                    // Create a file to write to.
+                    using (StreamWriter sw = File.CreateText(path)) {}	
+                }
+                using (StreamWriter sw = File.AppendText(path))
+                {
+                    while (instance.logBuffer.Count > 0){
+                        logItem = instance.logBuffer[instance.logBuffer.Count-1];
+                        instance.logBuffer.RemoveAt(instance.logBuffer.Count-1);
+                        sw.WriteLine(logItem);
+                    }
+                }
+                return;
+            }
+            string prefix = string.Format("[{0:yyyy-MM-dd HH:mm:ss}]", DateTime.Now);
+            instance.logBuffer.Add($"{prefix} {message}");
+            
+        }
+        public void backupLayout(){
+            if (!clientEnabled) return;
+            if (!communication.isOwner) return;
+            try {
+                string filename = string.Format("{0:yyyy-MM-dd HH-mm-ss}.layout", DateTime.Now);
+                Logger.LogInfo("Performing Layout Backup...");
+                byte[] layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
+                string path = Path.Combine(SandboxLayout.GetSavePath(), backupFolder);
+                //Logger.LogInfo(path + " " + filename);
+                if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+                Utils.WriteBytes(path, filename, layoutData);
+            }
+            catch (Exception ex){
+                Logger.LogError($"Caught error when backing up layout: {ex.Message}");
+            }
+        }
+
         public static void Connect(){
             /*
                 Usage:
@@ -558,6 +661,27 @@ namespace P2PMod
             instance.communication.SendRequest(JsonUtility.ToJson(message));
         }
 
+        public static void syncLayout(){
+            if (!instance.clientEnabled){
+                uConsole.Log("You aren't connected to anything.");
+                return;
+            }
+            SyncLayoutModel layout = new SyncLayoutModel();
+            var message = new BridgeActionModel { action = actionType.SYNC_LAYOUT };
+            
+            if (instance.communication.isOwner){
+                uConsole.Log("Force Syncing layout with all connected clients...");
+                layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
+                layout.targetAllUsers = true;
+                message.content = JsonUtility.ToJson(layout);
+                instance.communication.Lobby.SendBridgeAction(message);
+                return;
+            }
+            uConsole.Log("Requesting owner for layout...");
+            message.content = JsonUtility.ToJson(layout);
+            instance.communication.Lobby.SendBridgeAction(message);
+        }
+
         public void onEnableDisable(object sender, EventArgs e)
         {
             this.isEnabled = modEnabled.Value;
@@ -610,7 +734,7 @@ namespace P2PMod
                 ref BridgeEdge __result,
                 Edge physicsEdge_onlyUsedWhenBreakingEdgesInSimulation = null
             ){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 instance.ClientRecieving.TryGetValue(actionType.CREATE_EDGE, out var ClientIsRecieving);
                 if (ClientIsRecieving) return;
                 if (Bridge.IsSimulating()) return;
@@ -635,7 +759,7 @@ namespace P2PMod
                 string guid,
                 ref BridgeJoint __result
             ){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 instance.ClientRecieving.TryGetValue(actionType.CREATE_JOINT, out var ClientIsRecieving);
                 if (ClientIsRecieving) return;
                 if (Bridge.IsSimulating()) return;
@@ -653,7 +777,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(BridgeSelectionSet), "DeleteSelectionSet")]
         public static class EdgeAndJointDeletePatch {
             public static void Prefix() {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 List<BridgeJoint> list = new List<BridgeJoint>();
                 // firstly pretend to delete everything so we can see what is being deleted
 		        foreach (BridgeJoint bridgeJoint in BridgeSelectionSet.m_Joints)
@@ -717,7 +841,8 @@ namespace P2PMod
             [HarmonyPatch(typeof(BridgeJointMovement), "FinalizeMovement")]
             public static class TranslateJointPatch {
                 public static void Prefix(){
-                    if (!instance.clientEnabled) return;
+                    if (instance.preventSendActions) return;
+                    if (instance.preventSendActions || !instance.clientEnabled) return;
                     Vector3 translation = BridgeJointMovement.m_SelectedJoint.transform.position - BridgeJointMovement.m_SelectedJoint.m_BuildPos;
 		            if (!Mathf.Approximately(translation.magnitude, 0f)){
                         var joint = new BridgeJointProxy(BridgeJointMovement.m_SelectedJoint);
@@ -736,7 +861,7 @@ namespace P2PMod
                 public static void Prefix(
                     ref float ___m_NormalizedSliderValueWhenStartMoving
                 ){
-                    if (!instance.clientEnabled) return;
+                    if (instance.preventSendActions || !instance.clientEnabled) return;
                     if (BridgeSprings.m_SliderFollowingMouse){
 		            	float num = BridgeSprings.m_SliderFollowingMouse.GetNormalizedValue() - ___m_NormalizedSliderValueWhenStartMoving;
 		            	if (!Mathf.Approximately(num, 0f)){
@@ -758,7 +883,7 @@ namespace P2PMod
                 public static void Prefix(
                     ref float ___m_NormalizedSliderValueWhenStartMoving
                 ){
-                    if (!instance.clientEnabled) return;
+                    if (instance.preventSendActions || !instance.clientEnabled) return;
                     if (Pistons.m_SliderFollowingMouse){
 		            	float num = Pistons.m_SliderFollowingMouse.GetNormalizedValue() - ___m_NormalizedSliderValueWhenStartMoving;
 		            	if (!Mathf.Approximately(num, 0f)){
@@ -780,16 +905,17 @@ namespace P2PMod
         [HarmonyPatch(typeof(BridgeJointPlacement), "ProcessDoubleClickOnJoint")]
         public static class SplitJointCreateDeletePatch {
             public static void Prefix(BridgeJoint joint){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
+
                 actionType action = actionType.SPLIT_JOINT;
                 if (joint.m_IsSplit)
 		        {
 		        	action = actionType.UNSPLIT_JOINT;
                     instance.Logger.LogInfo("<CLIENT> sending UNSPLIT_JOINT");
 		        }
-		        else if (HydraulicsPhases.m_Phases.Count > 0)
+		        else 
 		        {
-		        	
+                    if (HydraulicsPhases.m_Phases.Count < 1) return;
 		        	action = actionType.SPLIT_JOINT;
                     instance.Logger.LogInfo("<CLIENT> sending SPLIT_JOINT");
 		        }
@@ -805,7 +931,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(BridgeJointSelector), "Cycle")]
         public static class SplitJointChangeNumbersPatch {
             public static void Postfix(bool forward, ref BridgeJointSelector __instance){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 var edge = new BridgeEdgeProxy(__instance.m_Edge);
                 var message = new BridgeActionModel {
                     action = actionType.SPLIT_MODIFY,
@@ -822,7 +948,7 @@ namespace P2PMod
         public static class AddSplitJointToPhasePatch {
             public static void Postfix(BridgeJoint joint, HydraulicsPhase hydraulicsPhase)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -848,7 +974,7 @@ namespace P2PMod
         public static class AddAllSplitJointsToPhasePatch {
             public static void Postfix(HydraulicsPhase hydraulicsPhase)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -874,7 +1000,7 @@ namespace P2PMod
         public static class AddSplitJointToAllPhasesAcceptingNewAdditionsPatch {
             public static void Postfix(BridgeJoint joint)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 instance.ClientRecieving.TryGetValue(actionType.SPLIT_JOINT, out var ClientIsRecieving);
                 if (ClientIsRecieving) return;
@@ -899,7 +1025,7 @@ namespace P2PMod
         public static class RemoveSplitJointFromPhasePatch {
             public static void Postfix(BridgeJoint joint, HydraulicsPhase hydraulicsPhase)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -924,7 +1050,7 @@ namespace P2PMod
         public static class RemoveSplitJointFromAllPhasesPatch {
             public static void Postfix(BridgeJoint joint)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 instance.ClientRecieving.TryGetValue(actionType.UNSPLIT_JOINT, out var ClientIsRecieving);
                 if (ClientIsRecieving) return;
@@ -950,7 +1076,7 @@ namespace P2PMod
         //public static class RemoveJointFromAllPhasesPatch {
         //    public static void Postfix(BridgeJoint joint)
         //    {
-        //        if (!instance.clientEnabled) return;
+        //        if (instance.preventSendActions || !instance.clientEnabled) return;
         //        if (Bridge.IsSimulating()) return;
         //        actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
         //        
@@ -974,7 +1100,7 @@ namespace P2PMod
         public static class RemoveAllSplitJointsFromPhasePatch {
             public static void Postfix(HydraulicsPhase hydraulicsPhase)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -998,7 +1124,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(HydraulicsController), "SetSplitJointStateForPhase")]
         public static class SetSplitJointStateForPhasePatch {
             public static void Postfix(HydraulicsPhase hydraulicsPhase, BridgeJoint joint, SplitJointState state){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 instance.ClientRecieving.TryGetValue(actionType.SPLIT_JOINT, out var ClientIsRecieving);
                 if (ClientIsRecieving) return;
@@ -1027,7 +1153,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(HydraulicsController), "ToggleSplitJoint")]
         public static class ToggleSplitJointPatch {
             public static void Prefix(HydraulicsPhase hydraulicsPhase, BridgeJoint joint){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -1055,7 +1181,7 @@ namespace P2PMod
         public static class AddPistonToHydraulicsPhasePatch {
             public static void Postfix(HydraulicsPhase hydraulicsPhase, Piston piston)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -1081,7 +1207,7 @@ namespace P2PMod
         public static class AddAllPistonsToPhasePatch {
             public static void Postfix(HydraulicsPhase hydraulicsPhase)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 
@@ -1109,7 +1235,7 @@ namespace P2PMod
         public static class AddPistonToAllPhasesAcceptingNewAdditionsPatch {
             public static void Postfix(Piston piston)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 var content = new HydraulicsControllerActionModel {
@@ -1133,7 +1259,7 @@ namespace P2PMod
         public static class RemoveAllPistonsFromPhasePatch {
             public static void Postfix(HydraulicsPhase hydraulicsPhase)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 
@@ -1161,7 +1287,7 @@ namespace P2PMod
         public static class RemovePistonFromAllPhasesPatch {
             public static void Postfix(Piston piston)
             {
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 
@@ -1182,7 +1308,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(HydraulicsController), "TogglePiston")]
         public static class TogglePistonPatch {
             public static void Prefix(HydraulicsPhase hydraulicsPhase, Piston piston){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -1210,7 +1336,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(HydraulicsController), "DisableNewAdditionsFromPhase")]
         public static class DisableNewAdditionsFromPhasePatch {
             public static void Postfix(HydraulicsPhase hydraulicsPhase){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -1234,7 +1360,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(HydraulicsController), "EnableNewAdditionsFromPhase")]
         public static class EnableNewAdditionsFromPhasePatch {
             public static void Postfix(HydraulicsPhase hydraulicsPhase){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 HydraulicsControllerPhase hydraulicsControllerPhase = HydraulicsController.FindControllerPhaseWithHydraulicsPhase(hydraulicsPhase);
@@ -1258,7 +1384,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(Panel_HydraulicsController), "OnThreeWayJointsToggle")]
         public static class OnThreeWayJointsTogglePatch {
             public static void Postfix(ref Panel_HydraulicsController __instance){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 if (Bridge.IsSimulating()) return;
                 actionType action = actionType.HYDRAULIC_CONTROLLER_ACTION;
                 var content = new HydraulicsControllerActionModel {
@@ -1278,7 +1404,7 @@ namespace P2PMod
         [HarmonyPatch(typeof(ClipboardManager), "MaybeSplitPastedJoint")]
         public static class MaybeSplitPastedJointPatch {
             public static void Postfix(BridgeJoint pastedJoint, BridgeJoint sourceJoint){
-                if (!instance.clientEnabled) return;
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 actionType action = actionType.SPLIT_JOINT;
                 
                 if (pastedJoint && pastedJoint.m_IsSplit)
@@ -1456,6 +1582,12 @@ namespace P2PMod
         public bool doForEveryPiston = false;
         public bool DisableAdditonsState = false;
         public bool weirdRemoveFlagForJointBeingDestroyed = false;
+    }
+
+    [System.Serializable]
+    public class SyncLayoutModel {
+        public byte[] layoutData;
+        public bool targetAllUsers;
     }
     
     

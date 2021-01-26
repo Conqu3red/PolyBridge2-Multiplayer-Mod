@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
-
+using System.IO;
+using System;
 /// <summary>
 /// Forefront class for the server communication.
 /// </summary>
@@ -23,12 +24,13 @@ public class ServerCommunication
     public string path = "";
     // Final server address
     public string server;
-
     // WebSocket Client
     public WsClient client;
+    public bool isOwner;
 
     // Class with messages for "lobby"
     public LobbyMessaging Lobby { private set; get; }
+    public string logFileName;
 
     /// <summary>
     /// Unity method called on initialization
@@ -36,11 +38,15 @@ public class ServerCommunication
     public ServerCommunication(){}
 
     public void Init(){
+        isOwner = false;
+        string time = string.Format("{0:yyyy-MM-dd HH-mm-ss}", DateTime.Now);
+        logFileName = $"session_{time}.log";
         server = "ws://" + host + ":" + port + "/" + path;
         client = new WsClient(server);
 
         // Messaging
         Lobby = new LobbyMessaging(this);
+        
     }
 
     /// <summary>
@@ -75,6 +81,12 @@ public class ServerCommunication
         if (message.metadata == "server_closed"){
             P2PMod.P2PMod.Disconnect();
         }
+        if (message.metadata == "owner"){
+            isOwner = true;
+        }
+        if (message.metadata == "connected"){
+            P2PMod.P2PMod.syncLayout();
+        }
         switch (message.type)
         {
             case LobbyMessaging.Register:
@@ -85,12 +97,15 @@ public class ServerCommunication
                 break;
             case LobbyMessaging.ConsoleMessage:
                 uConsole.Log(message.content);
+                if (isOwner) P2PMod.P2PMod.ActionLog($"Console Message - {message.content}");
                 break;
             case LobbyMessaging.PopupMessage:
                 PopUpMessage.DisplayOkOnly(message.content, null);
+                if (isOwner) P2PMod.P2PMod.ActionLog($"Popup Message - {message.content}");
                 break;
             case LobbyMessaging.TopLeftMessage:
                 GameUI.ShowMessage(ScreenMessageLocation.TOP_LEFT, message.content, 3f);
+                if (isOwner) P2PMod.P2PMod.ActionLog($"Info Message - {message.content}");
                 break;
             default:
                 Debug.LogError("Unknown type of method: " + message.type);

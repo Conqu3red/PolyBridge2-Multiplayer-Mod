@@ -35,3 +35,5 @@ PolyTechFramework-*.zip
 .vscode/
 build.bat
 *.dll
+#Certificate
+cert.pem
