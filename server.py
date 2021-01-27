@@ -215,7 +215,7 @@ class MultiplayerServer(WebSocket):
                 #if server doesn't exist, create it and assign as owner
                 open_lobbies[server_name] = Lobby(server_name, username)
                 server = open_lobbies[server_name]
-                if password != None:
+                if password:
                     server.password = sha256(password.encode("utf-8")).hexdigest()
                     server.lobby_mode = LobbyMode.password_locked
                 server.clients[username] = self

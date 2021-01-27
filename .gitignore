@@ -36,6 +36,6 @@ PolyTechFramework-*.zip
 build.bat
 *.dll
 #Certificate
-cert.pem
+*.pem
 #other
 env
