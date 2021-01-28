@@ -1434,6 +1434,7 @@ namespace P2PMod
                 yield return AccessTools.Method(typeof(BridgeUndo), "UndoTranslateSpringSlider");
             }
             public static void Postfix(BridgeActionPacket packet, MethodBase __originalMethod){
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 actionType action;
                 switch (__originalMethod.Name){
                     case "UndoCreateEdge": action = actionType.CREATE_EDGE; break;
@@ -1462,6 +1463,7 @@ namespace P2PMod
                 yield return AccessTools.Method(typeof(BridgeRedo), "RedoTranslateSpringSlider");
             }
             public static void Postfix(BridgeActionPacket packet, MethodBase __originalMethod){
+                if (instance.preventSendActions || !instance.clientEnabled) return;
                 actionType action;
                 switch (__originalMethod.Name){
                     case "RedoTranslateJoint": action = actionType.TRANSLATE_JOINT; break;

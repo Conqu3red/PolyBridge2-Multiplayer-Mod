@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using UnityEngine;
+using P2PMod;
 
 /// <summary>
 /// WebSocket Client class.
@@ -56,7 +57,13 @@ public class WsClient
     public async Task Connect()
     {
         Debug.Log("Connecting to: " + serverUri);
-        await ws.ConnectAsync(serverUri, CancellationToken.None);
+        try {
+            await ws.ConnectAsync(serverUri, CancellationToken.None);
+        }
+        catch (Exception e){
+            PopUpWarning.Display($"Error Occurred trying to connect to server: {e.Message}");
+            P2PMod.P2PMod.Disconnect();
+        }
         while (IsConnecting())
         {
             Debug.Log("Waiting to connect...");
