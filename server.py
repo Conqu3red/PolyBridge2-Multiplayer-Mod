@@ -31,11 +31,6 @@ class LobbyMode:
 
 def keyboardInterruptHandler(signal, frame):
     print("KeyboardInterrupt (ID: {}) has been caught. Cleaning up...".format(signal))
-    for lobby_name in open_lobbies.keys():
-        lobby = open_lobbies[lobby_name]
-        lobby.clients[lobby.owner].send_message(json.dumps({"type":MessageType.PopupMessage, "content":"The Hosting Server was Terminated.", "metadata":"server_closed"}))
-        lobby.close()
-    
     print("Clean up complete, terminating...")
     exit(0)
 signal.signal(signal.SIGINT, keyboardInterruptHandler)
@@ -103,6 +98,9 @@ class MultiplayerServer(WebSocket):
                     content = json.loads(message["content"])
                     user = server.clients.get(content["username"])
                     if user:
+                        if content["username"] == server.owner:
+                            self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"You cannot kick yourself!"}))
+                            return
                         user.send_message(json.dumps({"type":MessageType.PopupMessage, "content":f"You were kicked from the server. Reason: {content.get('reason') or 'No Reason Provided'}", "metadata":"server_closed"}))
                         del server.clients[content["username"]]
                         server.print(f"{content['username']} was kicked.")

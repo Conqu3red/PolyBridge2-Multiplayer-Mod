@@ -44,7 +44,7 @@ public class LobbyMessaging : BaseMessaging
     /// <param name="request">Request.</param>
     public void SendBridgeAction(BridgeActionModel request)
     {
-
+        if (P2PMod.P2PMod.instance.serverIsFrozen && request.action != P2PMod.actionType.FREEZE) return;
         var message = new MessageModel
         {
             type = BridgeAction,

@@ -46,6 +46,7 @@ namespace P2PMod
         public System.Timers.Timer BackupTimer = new System.Timers.Timer();
         public List<string> logBuffer = new List<string> ();
         public string backupFolder = "MultiplayerBackups";
+        public bool serverIsFrozen = false;
         
         void Awake()
         {
@@ -57,6 +58,8 @@ namespace P2PMod
            
             modEnabled = Config.Bind(modEnabledDef, true, new ConfigDescription("Enable Mod"));
             logActions = Config.Bind("P2P Mod", "Log Actions (only logs if you are host)", false);
+            
+
             backupFrequency = Config.Bind("P2P Mod", "Backup Frequency (seconds)", 60f);
             writeToLogFrequency = Config.Bind("P2P Mod", "Save to action log every amount of lines", 100f);
             
@@ -87,7 +90,7 @@ namespace P2PMod
             uConsole.RegisterCommand("set_user_cap", new uConsole.DebugCommand(setUserCap));
             uConsole.RegisterCommand("set_lobby_mode", new uConsole.DebugCommand(setLobbyMode));
             uConsole.RegisterCommand("sync_layout", new uConsole.DebugCommand(syncLayout));
-
+            uConsole.RegisterCommand("create_invite", new uConsole.DebugCommand(CreateInvite));
 
             uConsole.RegisterCommand("kick","kick <username> <?reason>", new uConsole.DebugCommand(KickUser));
         }
@@ -121,10 +124,9 @@ namespace P2PMod
             }
             
             
-            // swtich to handle actions
+            // switch to handle actions
             switch (message.action){
                 case actionType.CREATE_EDGE:
-                    instance.ClientRecieving[actionType.CREATE_EDGE] = true;
                     edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
                     //BridgeEdges.CreateEdgeFromProxy(edgeProxy);
 
@@ -138,20 +140,28 @@ namespace P2PMod
 		            	edge.RefreshJointSelectorNumbers();
 		            	break;
 		            }
+                    var NodeA = BridgeJoints.FindByGuid(edgeProxy.m_NodeA_Guid);
+                    var NodeB = BridgeJoints.FindByGuid(edgeProxy.m_NodeB_Guid);
+                    if (!NodeA || !NodeB){
+                        AlertRecieveError("Node/Joint Missing when trying to create edge");
+                        break;
+                    }
 
                     BridgeEdge edgeFromJoints = BridgeEdges.GetEdgeFromJoints(
-                        BridgeJoints.FindByGuid(edgeProxy.m_NodeA_Guid),
-                        BridgeJoints.FindByGuid(edgeProxy.m_NodeB_Guid)
+                        NodeA,
+                        NodeB
                     );
                     if (edgeFromJoints){
                         edgeFromJoints.ForceDisable();
                     }
+                    
+                    instance.ClientRecieving[actionType.CREATE_EDGE] = true;
                     edge = BridgeEdges.CreateEdgeWithPistonOrSpring(
-                        BridgeJoints.FindByGuid(edgeProxy.m_NodeA_Guid),
-                        BridgeJoints.FindByGuid(edgeProxy.m_NodeB_Guid),
+                        NodeA,
+                        NodeB,
                         edgeProxy.m_Material
                     );
-                    
+                    instance.ClientRecieving[actionType.CREATE_EDGE] = false;
                     if (edge.IsPiston())
 		            {
 		            	Pistons.GetPistonOnEdge(edge).m_Slider.MakeVisible();
@@ -160,11 +170,9 @@ namespace P2PMod
 		            {
 		            	edge.m_SpringCoilVisualization.m_Slider.MakeVisible();
 		            }
-
-                    instance.ClientRecieving[actionType.CREATE_EDGE] = false;
                     break;
+                
                 case actionType.CREATE_JOINT:
-                    instance.ClientRecieving[actionType.CREATE_JOINT] = true;
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
 	                if (joint)
@@ -172,6 +180,7 @@ namespace P2PMod
 	                	joint.gameObject.SetActive(true);
 	                	break;
 	                }
+                    instance.ClientRecieving[actionType.CREATE_JOINT] = true;
                     BridgeJoints.CreateJointFromProxy(jointProxy);
                     instance.ClientRecieving[actionType.CREATE_JOINT] = false;
                     break;
@@ -182,18 +191,23 @@ namespace P2PMod
                         edge.ForceDisable();
                         edge.SetStressColor(0f);
                     }
+                    BridgeJoints.DeleteOrphanedJoints();
                     break;
                 case actionType.DELETE_JOINT:
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
-                    joint.gameObject.SetActive(false);
+                    if (joint){
+                        joint.gameObject.SetActive(false);
+                    }
                     break;
                 case actionType.TRANSLATE_JOINT:
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
-                    joint.transform.position = jointProxy.m_Pos;
-                    joint.m_BuildPos = joint.transform.position;
-                    joint.TryRecreateSpringVisualizationForAttachedEdges();
+                    if (joint){
+                        joint.transform.position = jointProxy.m_Pos;
+                        joint.m_BuildPos = joint.transform.position;
+                        joint.TryRecreateSpringVisualizationForAttachedEdges();
+                    }
                     break;
                 case actionType.SPRING_SLIDER_TRANSLATE:
                     springProxy = JsonUtility.FromJson<BridgeSpringProxy>(message.content);
@@ -202,10 +216,12 @@ namespace P2PMod
                         springProxy.m_NodeB_Guid,
                         BridgeMaterialType.SPRING
                     );
-                    spring.m_SpringCoilVisualization.m_Slider.SetNormalizedValue(springProxy.m_NormalizedValue);
-				    spring.m_SpringCoilVisualization.UpdateFreeLengthFromSliderPos();
-                    spring.m_SpringCoilVisualization.MaybeRecreateLinks();
-				    spring.m_SpringCoilVisualization.UpdateLinks();
+                    if (spring){
+                        spring.m_SpringCoilVisualization.m_Slider.SetNormalizedValue(springProxy.m_NormalizedValue);
+				        spring.m_SpringCoilVisualization.UpdateFreeLengthFromSliderPos();
+                        spring.m_SpringCoilVisualization.MaybeRecreateLinks();
+				        spring.m_SpringCoilVisualization.UpdateLinks();
+                    }
                     break;
                 case actionType.PISTON_SLIDER_TRANSLATE:
                     pistonProxy = JsonUtility.FromJson<PistonProxy>(message.content);
@@ -214,30 +230,38 @@ namespace P2PMod
                         pistonProxy.m_NodeB_Guid,
                         BridgeMaterialType.HYDRAULICS
                     ));
-                    piston.m_Slider.SetNormalizedValue(pistonProxy.m_NormalizedValue);
-                    piston.m_Slider.MakeVisible();
+                    if (piston){
+                        piston.m_Slider.SetNormalizedValue(pistonProxy.m_NormalizedValue);
+                        piston.m_Slider.MakeVisible();
+                    }
                     break;
                 case actionType.SPLIT_JOINT:
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
-                    instance.ClientRecieving[actionType.SPLIT_JOINT] = true;
-                    joint.Split();
-                    joint.ResetJointSelectors();
-                    instance.ClientRecieving[actionType.SPLIT_JOINT] = false;
+                    if (joint){
+                        instance.ClientRecieving[actionType.SPLIT_JOINT] = true;
+                        joint.Split();
+                        joint.ResetJointSelectors();
+                        instance.ClientRecieving[actionType.SPLIT_JOINT] = false;
+                    }
                     break;
                 case actionType.UNSPLIT_JOINT:
                     jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
-                    instance.ClientRecieving[actionType.UNSPLIT_JOINT] = true;
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
-                    joint.UnSplit();
-                    instance.ClientRecieving[actionType.UNSPLIT_JOINT] = false;
+                    if (joint){
+                        instance.ClientRecieving[actionType.UNSPLIT_JOINT] = true;
+                        joint.UnSplit();
+                        instance.ClientRecieving[actionType.UNSPLIT_JOINT] = false;
+                    }
                     break;
                 case actionType.SPLIT_MODIFY:
                     edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
                     edge = BridgeEdges.FindEnabledEdgeByJointGuids(edgeProxy.m_NodeA_Guid, edgeProxy.m_NodeB_Guid, edgeProxy.m_Material);
-                    edge.m_JointAPart = edgeProxy.m_JointAPart;
-                    edge.m_JointBPart = edgeProxy.m_JointBPart;
-                    edge.RefreshJointSelectorNumbers();
+                    if (edge){
+                        edge.m_JointAPart = edgeProxy.m_JointAPart;
+                        edge.m_JointBPart = edgeProxy.m_JointBPart;
+                        edge.RefreshJointSelectorNumbers();
+                    }
                     break;
                 case actionType.HYDRAULIC_CONTROLLER_ACTION:
                     HydraulicsControllerActionModel content = JsonUtility.FromJson<HydraulicsControllerActionModel>(message.content);
@@ -401,6 +425,14 @@ namespace P2PMod
                     preventSendActions = false;
                     PopUpMessage.DisplayOkOnly("The host has synced their layout with you", null);
                     break;
+
+                case actionType.FREEZE:
+                    serverIsFrozen = message.content == "true" ? true : false;
+                    instance.Logger.LogInfo(serverIsFrozen);
+                    if (serverIsFrozen){
+                        PopUpMessage.DisplayOkOnly("Changes frozen by host.", null);
+                    }
+                    break;
                 default:
                     instance.Logger.LogError("<CLIENT> recieved unexpected action");
                     break;
@@ -419,8 +451,16 @@ namespace P2PMod
             return optional_params;
         }
 
-
-        
+        public static void AlertRecieveError(string message){
+            if (!instance.communication.isOwner){
+                PopUpMessage.Display(
+                    "A problem occurred: " + message + " - Press tick to attempt to sync layout with the host or cross to dismiss this message.",
+                    () => syncLayout(),
+                    () => {}
+                );
+            }
+            
+        }
 
         public static void ActionLog(string message){
             string logItem;
@@ -630,7 +670,7 @@ namespace P2PMod
                 uConsole.Log("Changing Mode...");
             }
             else {
-                uConsole.Log("Invalid Mode! Valid modes are: public, password, password_locked, invite_only");
+                uConsole.Log("Invalid Mode! Valid modes are: public, password_locked, invite_only");
                 return;
             }
 
@@ -655,7 +695,7 @@ namespace P2PMod
                 uses = uses
             };
             var message = new MessageModel {
-                type = LobbyMessaging.ServerConfig,
+                type = LobbyMessaging.CreateInvite,
                 content = JsonUtility.ToJson(content) 
             };
             instance.communication.SendRequest(JsonUtility.ToJson(message));
@@ -666,10 +706,23 @@ namespace P2PMod
                 uConsole.Log("You aren't connected to anything.");
                 return;
             }
+            if (!instance.serverIsFrozen){
+                uConsole.Log("Changes are currently frozen.");
+                return;
+            }
             SyncLayoutModel layout = new SyncLayoutModel();
             var message = new BridgeActionModel { action = actionType.SYNC_LAYOUT };
             
             if (instance.communication.isOwner){
+                if (instance.serverIsFrozen){
+                    instance.communication.Lobby.SendBridgeAction(
+                        new BridgeActionModel {
+                            action = actionType.FREEZE,
+                            content = "false"
+                        }
+                    );
+                    instance.serverIsFrozen = false;
+                }
                 uConsole.Log("Force Syncing layout with all connected clients...");
                 layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
                 layout.targetAllUsers = true;
@@ -1542,6 +1595,42 @@ namespace P2PMod
             instance.communication.Lobby.SendBridgeAction(message);
         }
 
+
+        
+        [HarmonyPatch]
+        public static class PasueMenuPatch {
+            static IEnumerable<MethodBase> TargetMethods()
+            {
+                yield return AccessTools.Method(typeof(Panel_PauseMenu), "ExitToMainMenu");
+                yield return AccessTools.Method(typeof(Panel_PauseMenu), "ExitToCampaignMenu");
+            }
+            public static bool Prefix(){
+                if (!instance.clientEnabled || instance.serverIsFrozen) return true;
+                if (instance.communication.isOwner){
+                    var message = new BridgeActionModel {
+                        action = actionType.FREEZE,
+                        content = "true"
+                    };
+                    instance.Logger.LogInfo($"<CLIENT> sending {message.action} - PauseMenu");
+                    instance.communication.Lobby.SendBridgeAction(message);
+                    PopUpMessage.DisplayOkOnly(
+                        "Changes frozen until sync_layout is run again.", 
+                        null
+                    );
+                    instance.serverIsFrozen = true;
+                    return true;
+                }
+                else {
+                    PopUpMessage.DisplayOkOnly(
+                        "Please disconnect from the active session before exiting.", 
+                        null
+                    );
+                    return false;
+                }
+            }
+        }
+
+
         Harmony harmony;
     }
 
@@ -1557,7 +1646,8 @@ namespace P2PMod
 	    UNSPLIT_JOINT,
         SPLIT_MODIFY,
         HYDRAULIC_CONTROLLER_ACTION,
-        SYNC_LAYOUT
+        SYNC_LAYOUT,
+        FREEZE
     }
     public enum HydraulicsControllerAction {
         ADD_SPLIT_JOINT,
