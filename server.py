@@ -115,7 +115,7 @@ class MultiplayerServer(WebSocket):
 
                 if message["type"] == MessageType.ServerConfig and server.isOwner(self):
                     content = json.loads(message["content"])
-                    print(content)
+                    #print(content)
                     if content.get("userCap") != None: server.user_cap = content["userCap"]
                     if content.get("acceptingConnections") != None: server.accepting_connections = content["acceptingConnections"]
                     if content.get("newPassword") != None:
