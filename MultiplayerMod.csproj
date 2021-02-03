@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
-    <RootNamespace>P2PMod</RootNamespace>
+    <RootNamespace>MultiplayerMod</RootNamespace>
   </PropertyGroup>
 	
 	<ItemGroup>
@@ -48,16 +48,5 @@
         <Reference Include="UnityEngine.JSONSerializeModule">
             <HintPath>../Poly Bridge 2/Poly Bridge 2_Data/Managed/UnityEngine.JSONSerializeModule.dll</HintPath>
         </Reference>
-        <Reference Include="ConsoleMod">
-            <HintPath>../Poly Bridge 2/BepInEx/plugins/ConsoleMod.dll</HintPath>
-        </Reference>
-
-        
-        
-
-	</ItemGroup>
-	
-	<ItemGroup>
-	  <PackageReference Include="Fleck" Version="1.1.0" />
 	</ItemGroup>
 </Project>

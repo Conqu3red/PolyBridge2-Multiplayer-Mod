@@ -13,22 +13,22 @@ using System.Threading;
 using UnityEngine.UI;
 using System.IO;
 
-namespace P2PMod
+namespace MultiplayerMod
 {
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     // Specify the mod as a dependency of PTF
     [BepInDependency(PolyTechMain.PluginGuid, BepInDependency.DependencyFlags.HardDependency)]
     // This Changes from BaseUnityPlugin to PolyTechMod.
     // This superclass is functionally identical to BaseUnityPlugin, so existing documentation for it will still work.
-    public partial class P2PMod : PolyTechMod
+    public partial class MultiplayerMod : PolyTechMod
     {
         public new const string
-            PluginGuid = "org.bepinex.plugins.P2PMod",
+            PluginGuid = "org.bepinex.plugins.MultiplayerMod",
             PluginName = "P2P Mod",
             PluginVersion = "1.0.0";
         
         public static ConfigDefinition
-            modEnabledDef = new ConfigDefinition("P2P Mod", "Enable/Disable Mod");
+            modEnabledDef = new ConfigDefinition("Multiplayer Mod", "Enable/Disable Mod");
         public static ConfigEntry<bool>
             modEnabled,
             logActions;
@@ -36,7 +36,7 @@ namespace P2PMod
             backupFrequency,
             writeToLogFrequency;
         private static ConfigEntry<BepInEx.Configuration.KeyboardShortcut> _keybind;
-        public static P2PMod instance;
+        public static MultiplayerMod instance;
         public static string ClientName = "";
         public static string serverName = "";
         //public bool clientEnabled = false;
@@ -56,13 +56,13 @@ namespace P2PMod
             isCheat = false;
            
             modEnabled = Config.Bind(modEnabledDef, true, new ConfigDescription("Enable Mod"));
-            logActions = Config.Bind("P2P Mod", "Log Actions (only logs if you are host)", false);
+            logActions = Config.Bind("Multiplayer Mod", "Log Actions (only logs if you are host)", false);
             
 
-            backupFrequency = Config.Bind("P2P Mod", "Backup Frequency (seconds)", 60f);
-            writeToLogFrequency = Config.Bind("P2P Mod", "Save to action log every amount of lines", 100f);
+            backupFrequency = Config.Bind("Multiplayer Mod", "Backup Frequency (seconds)", 60f);
+            writeToLogFrequency = Config.Bind("Multiplayer Mod", "Save to action log every amount of lines", 100f);
             
-            _keybind = Config.Bind("P2P Mod", "Keybind to open GUI", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F3));
+            _keybind = Config.Bind("Multiplayer Mod", "Keybind to open GUI", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F3));
             
             BackupTimer.Elapsed += (sender, args) => { backupLayout(); };
             BackupTimer.AutoReset = true;
@@ -78,21 +78,10 @@ namespace P2PMod
             };
 
 
-            harmony = new Harmony("org.bepinex.plugins.P2PMod");
+            harmony = new Harmony("org.bepinex.plugins.MultiplayerMod");
             harmony.PatchAll(Assembly.GetExecutingAssembly());
 
             PolyTechMain.registerMod(this);
-            Logger.LogInfo("P2P MOD");
-            //uConsole.RegisterCommand("multiplayer_connect", new uConsole.DebugCommand(Connect));
-            //uConsole.RegisterCommand("multiplayer_disconnect", new uConsole.DebugCommand(Disconnect));
-            //uConsole.RegisterCommand("multiplayer_connection_info", new uConsole.DebugCommand(ConnectionInfo));
-            //uConsole.RegisterCommand("multiplayer_accept_connections", new uConsole.DebugCommand(setAcceptConnections));
-            //uConsole.RegisterCommand("multiplayer_set_password", new uConsole.DebugCommand(setPassword));
-            //uConsole.RegisterCommand("multiplayer_set_user_cap", new uConsole.DebugCommand(setUserCap));
-            //uConsole.RegisterCommand("multiplayer_set_lobby_mode", new uConsole.DebugCommand(setLobbyMode));
-            //uConsole.RegisterCommand("multiplayer_sync_layout", new uConsole.DebugCommand(syncLayout));
-            //uConsole.RegisterCommand("multiplayer_create_invite", new uConsole.DebugCommand(CreateInvite));
-            //uConsole.RegisterCommand("multiplayer_kick", new uConsole.DebugCommand(KickUser));
         }
 
         public bool clientEnabled 

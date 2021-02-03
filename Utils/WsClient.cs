@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using UnityEngine;
-using P2PMod;
+using MultiplayerMod;
 
 /// <summary>
 /// WebSocket Client class.
@@ -62,7 +62,7 @@ public class WsClient
         }
         catch (Exception e){
             PopUpWarning.Display($"Error Occurred trying to connect to server: {e.Message}");
-            P2PMod.P2PMod.Disconnect();
+            MultiplayerMod.MultiplayerMod.Disconnect();
         }
         while (IsConnecting())
         {
@@ -71,7 +71,7 @@ public class WsClient
         }
         Debug.Log("Connect status: " + ws.State);
         if (ws.State == WebSocketState.Open){
-            P2PMod.P2PMod.instance.communication.Lobby.OnConnectedToServer?.Invoke();
+            MultiplayerMod.MultiplayerMod.instance.communication.Lobby.OnConnectedToServer?.Invoke();
         }
     }
 

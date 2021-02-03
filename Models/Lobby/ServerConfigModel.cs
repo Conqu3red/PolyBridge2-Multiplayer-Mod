@@ -1,4 +1,4 @@
-using P2PMod;
+using MultiplayerMod;
 using System.Collections.Generic;
 
 [System.Serializable]

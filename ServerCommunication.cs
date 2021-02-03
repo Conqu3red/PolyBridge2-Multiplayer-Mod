@@ -79,13 +79,13 @@ public class ServerCommunication
 
         // Picking correct method for message handling
         if (message.metadata == "server_closed"){
-            P2PMod.P2PMod.Disconnect();
+            MultiplayerMod.MultiplayerMod.Disconnect();
         }
         if (message.metadata == "owner"){
             isOwner = true;
         }
         if (message.metadata == "connected"){
-            P2PMod.P2PMod.syncLayout();
+            MultiplayerMod.MultiplayerMod.syncLayout();
         }
         switch (message.type)
         {
@@ -93,28 +93,28 @@ public class ServerCommunication
                 Lobby.OnBridgeAction?.Invoke(JsonUtility.FromJson<BridgeActionModel>(message.content));
                 break;
             case "ConnectionResponse":
-                P2PMod.P2PMod.GUIValues.ConnectionResponse = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.ConnectionResponse = message.content;
                 break;
             case LobbyMessaging.ServerInfo:
-                P2PMod.P2PMod.GUIValues.serverInfoString = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.serverInfoString = message.content;
                 break;
             case LobbyMessaging.KickUser:
-                P2PMod.P2PMod.GUIValues.kickResponse = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.kickResponse = message.content;
                 break;
             case LobbyMessaging.ServerConfig:
-                P2PMod.P2PMod.GUIValues.ConfigResponse = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.ConfigResponse = message.content;
                 break;
             case LobbyMessaging.CreateInvite:
-                P2PMod.P2PMod.GUIValues.InviteResponse = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.InviteResponse = message.content;
                 break;
 
             case LobbyMessaging.PopupMessage:
                 PopUpMessage.DisplayOkOnly(message.content, null);
-                if (isOwner) P2PMod.P2PMod.ActionLog($"Popup Message - {message.content}");
+                if (isOwner) MultiplayerMod.MultiplayerMod.ActionLog($"Popup Message - {message.content}");
                 break;
             case LobbyMessaging.TopLeftMessage:
                 GameUI.ShowMessage(ScreenMessageLocation.TOP_LEFT, message.content, 3f);
-                if (isOwner) P2PMod.P2PMod.ActionLog($"Info Message - {message.content}");
+                if (isOwner) MultiplayerMod.MultiplayerMod.ActionLog($"Info Message - {message.content}");
                 break;
             default:
                 Debug.LogError("Unknown type of method: " + message.type);

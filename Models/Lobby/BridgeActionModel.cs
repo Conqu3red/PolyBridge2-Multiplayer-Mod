@@ -1,4 +1,4 @@
-using P2PMod;
+using MultiplayerMod;
 /// <summary>
 /// Echo message model.
 /// </summary>

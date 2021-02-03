@@ -12,9 +12,9 @@ using System.Net.WebSockets;
 using System.Threading;
 using UnityEngine.UI;
 using System.IO;
-namespace P2PMod
+namespace MultiplayerMod
 {
-    public partial class P2PMod {
+    public partial class MultiplayerMod {
         internal Rect WindowRect { get; private set; }
         internal int LeftColumnWidth { get; private set; }
         internal int RightColumnWidth { get; private set; }
