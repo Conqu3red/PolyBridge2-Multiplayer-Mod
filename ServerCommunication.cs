@@ -89,16 +89,25 @@ public class ServerCommunication
         }
         switch (message.type)
         {
-            case LobbyMessaging.Register:
-                Lobby.OnConnectedToServer?.Invoke();
-                break;
             case LobbyMessaging.BridgeAction:
                 Lobby.OnBridgeAction?.Invoke(JsonUtility.FromJson<BridgeActionModel>(message.content));
                 break;
-            case LobbyMessaging.ConsoleMessage:
-                uConsole.Log(message.content);
-                if (isOwner) P2PMod.P2PMod.ActionLog($"Console Message - {message.content}");
+            case "ConnectionResponse":
+                P2PMod.P2PMod.GUIValues.ConnectionResponse = message.content;
                 break;
+            case LobbyMessaging.ServerInfo:
+                P2PMod.P2PMod.GUIValues.serverInfoString = message.content;
+                break;
+            case LobbyMessaging.KickUser:
+                P2PMod.P2PMod.GUIValues.kickResponse = message.content;
+                break;
+            case LobbyMessaging.ServerConfig:
+                P2PMod.P2PMod.GUIValues.ConfigResponse = message.content;
+                break;
+            case LobbyMessaging.CreateInvite:
+                P2PMod.P2PMod.GUIValues.InviteResponse = message.content;
+                break;
+
             case LobbyMessaging.PopupMessage:
                 PopUpMessage.DisplayOkOnly(message.content, null);
                 if (isOwner) P2PMod.P2PMod.ActionLog($"Popup Message - {message.content}");
@@ -119,6 +128,19 @@ public class ServerCommunication
     public async void ConnectToServer()
     {
         await client.Connect();
+    }
+
+    public bool IsConnected(){
+        if (client != null){
+            return client.IsConnectionOpen();
+        }
+        return false;
+    }
+    public bool IsConnecting(){
+        if (client != null){
+            return client.IsConnecting();
+        }
+        return false;
     }
 
     /// <summary>

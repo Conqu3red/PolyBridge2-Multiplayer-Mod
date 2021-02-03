@@ -18,15 +18,14 @@ namespace P2PMod
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     // Specify the mod as a dependency of PTF
     [BepInDependency(PolyTechMain.PluginGuid, BepInDependency.DependencyFlags.HardDependency)]
-    [BepInDependency(ConsoleMod.ConsoleMod.PluginGuid, BepInDependency.DependencyFlags.HardDependency)]
     // This Changes from BaseUnityPlugin to PolyTechMod.
     // This superclass is functionally identical to BaseUnityPlugin, so existing documentation for it will still work.
-    public class P2PMod : PolyTechMod
+    public partial class P2PMod : PolyTechMod
     {
         public new const string
             PluginGuid = "org.bepinex.plugins.P2PMod",
             PluginName = "P2P Mod",
-            PluginVersion = "0.1.0";
+            PluginVersion = "1.0.0";
         
         public static ConfigDefinition
             modEnabledDef = new ConfigDefinition("P2P Mod", "Enable/Disable Mod");
@@ -36,10 +35,11 @@ namespace P2PMod
         public static ConfigEntry<float>
             backupFrequency,
             writeToLogFrequency;
+        private static ConfigEntry<BepInEx.Configuration.KeyboardShortcut> _keybind;
         public static P2PMod instance;
         public static string ClientName = "";
         public static string serverName = "";
-        public bool clientEnabled = false;
+        //public bool clientEnabled = false;
         public bool preventSendActions = false;
         public ServerCommunication communication;
         public Dictionary<actionType, bool> ClientRecieving = new Dictionary<actionType, bool> {};
@@ -47,7 +47,6 @@ namespace P2PMod
         public List<string> logBuffer = new List<string> ();
         public string backupFolder = "MultiplayerBackups";
         public bool serverIsFrozen = false;
-        
         void Awake()
         {
             this.repositoryUrl = "https://github.com/Conqu3red/PolyBridge2-Multiplayer-Mod/";
@@ -62,6 +61,8 @@ namespace P2PMod
 
             backupFrequency = Config.Bind("P2P Mod", "Backup Frequency (seconds)", 60f);
             writeToLogFrequency = Config.Bind("P2P Mod", "Save to action log every amount of lines", 100f);
+            
+            _keybind = Config.Bind("P2P Mod", "Keybind to open GUI", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F3));
             
             BackupTimer.Elapsed += (sender, args) => { backupLayout(); };
             BackupTimer.AutoReset = true;
@@ -82,20 +83,44 @@ namespace P2PMod
 
             PolyTechMain.registerMod(this);
             Logger.LogInfo("P2P MOD");
-            uConsole.RegisterCommand("connect", new uConsole.DebugCommand(Connect));
-            uConsole.RegisterCommand("disconnect", new uConsole.DebugCommand(Disconnect));
-            uConsole.RegisterCommand("connection_info", new uConsole.DebugCommand(ConnectionInfo));
-            uConsole.RegisterCommand("accept_connections", new uConsole.DebugCommand(setAcceptConnections));
-            uConsole.RegisterCommand("set_password", new uConsole.DebugCommand(setPassword));
-            uConsole.RegisterCommand("set_user_cap", new uConsole.DebugCommand(setUserCap));
-            uConsole.RegisterCommand("set_lobby_mode", new uConsole.DebugCommand(setLobbyMode));
-            uConsole.RegisterCommand("sync_layout", new uConsole.DebugCommand(syncLayout));
-            uConsole.RegisterCommand("create_invite", new uConsole.DebugCommand(CreateInvite));
+            //uConsole.RegisterCommand("multiplayer_connect", new uConsole.DebugCommand(Connect));
+            //uConsole.RegisterCommand("multiplayer_disconnect", new uConsole.DebugCommand(Disconnect));
+            //uConsole.RegisterCommand("multiplayer_connection_info", new uConsole.DebugCommand(ConnectionInfo));
+            //uConsole.RegisterCommand("multiplayer_accept_connections", new uConsole.DebugCommand(setAcceptConnections));
+            //uConsole.RegisterCommand("multiplayer_set_password", new uConsole.DebugCommand(setPassword));
+            //uConsole.RegisterCommand("multiplayer_set_user_cap", new uConsole.DebugCommand(setUserCap));
+            //uConsole.RegisterCommand("multiplayer_set_lobby_mode", new uConsole.DebugCommand(setLobbyMode));
+            //uConsole.RegisterCommand("multiplayer_sync_layout", new uConsole.DebugCommand(syncLayout));
+            //uConsole.RegisterCommand("multiplayer_create_invite", new uConsole.DebugCommand(CreateInvite));
+            //uConsole.RegisterCommand("multiplayer_kick", new uConsole.DebugCommand(KickUser));
+        }
 
-            uConsole.RegisterCommand("kick","kick <username> <?reason>", new uConsole.DebugCommand(KickUser));
+        public bool clientEnabled 
+        {
+            get {
+                if (communication != null){
+                    return communication.IsConnected();
+                }
+                return false;
+            }
+            set {}
+        }
+        public bool clientConnecting
+        {
+            get {
+                if (communication != null){
+                    return communication.IsConnecting();
+                }
+                return false;
+            }
+            set {}
         }
 
         public void Update(){
+            if (!DisplayingWindow && _keybind.Value.IsUp())
+            {
+                DisplayingWindow = true;
+            }
             if (instance.communication != null) instance.communication.Update();
         }
 
@@ -505,65 +530,67 @@ namespace P2PMod
             }
         }
 
+        public static void RaiseConnectionError(string error){
+            GUIValues.ConnectionResponse = $"<color=red>Connection Error occured: {error}</color>";
+        }
+
         public static void Connect(){
-            /*
-                Usage:
-                connect <host_ip> <port> <server_name>
-                optional:
-                password=<password>
-                invite=<invite>
-
-                Examples:
-                connect 127.0.0.1 8181 test
-                connect 127.0.0.1 8181 test password=abc123
-                connect 127.0.0.1 8181 test invite=52fc013e-bf9a-4859-ba3e-01e1531d7d03
-            */
+            //if (instance.clientEnabled){
+            //    uConsole.Log("Already Connected to a server");
+            //    return;
+            //}
+            //
+            //if (uConsole.GetNumParameters() < 3){
+            //    uConsole.Log("Usage (? signifies optional): Connect <host_ip> <port> <server_name> <?password>");
+            //    return;
+            //}
             
-
-
-            if (instance.clientEnabled){
-                uConsole.Log("Already Connected to a server");
+            if (GameStateManager.GetState() != GameState.BUILD){
+                GUIValues.ConnectionResponse = "You must be in build mode to start/connect to a session";
                 return;
             }
-            
-            if (uConsole.GetNumParameters() < 3){
-                uConsole.Log("Usage (? signifies optional): Connect <host_ip> <port> <server_name> <?password>");
+
+
+            string hostIP = GUIValues.ip;
+            int port;
+            try {
+                port = int.Parse(GUIValues.port);
+            }
+            catch {
+                RaiseConnectionError("Invalid port");
                 return;
             }
-            
-
-            string hostIP = uConsole.GetString();
-            int port = uConsole.GetInt();
-            serverName = uConsole.GetString();
+            serverName = GUIValues.sessionName;
             string password, invite;
             ClientName = Workshop.GetLocalPlayerDisplayName();
             string id = Workshop.GetLocalPlayerId();
-            List<string> parameters = uConsole.m_Instance.GetAllParameters();
-            parameters = parameters.GetRange(3, parameters.Count - 3);
-            Dictionary<string, string> optional_params = getOptionalParams(parameters);
-            
-            optional_params.TryGetValue("password", out password);
-            optional_params.TryGetValue("invite", out invite);
-
+            password = GUIValues.password;
+            invite = GUIValues.invite;
+            if (serverName == ""){
+                RaiseConnectionError("Invalid Session Name");
+                return;
+            }
+            if (hostIP == ""){
+                RaiseConnectionError("Invalid host IP");
+                return;
+            }
             instance.communication = new ServerCommunication();
             instance.communication.useLocalhost = false;
             instance.communication.hostIP = hostIP;
             instance.communication.path = $"{serverName}?username={ClientName}&id={id}";
-            if (password != null) instance.communication.path += $"&password={password}";
-            if (invite != null) instance.communication.path += $"&invite={invite}";
+            if (password != "") instance.communication.path += $"&password={password}";
+            if (invite != "") instance.communication.path += $"&invite={invite}";
             instance.communication.port = port;
             instance.communication.Init();
             instance.communication.Lobby.OnConnectedToServer += instance.OnConnectedToServer;
             instance.communication.ConnectToServer();
-            instance.OnConnectedToServer();
             //uConsole.Log("Enabled Client");
-            instance.clientEnabled = true;
         }
         public static void Disconnect(){
-            if (!instance.clientEnabled){
-                uConsole.Log("You aren't connected to anything.");
-                return;
-            }
+            //if (!instance.clientEnabled){
+            //    uConsole.Log("You aren't connected to anything.");
+            //    return;
+            //}
             try {
                 if (instance != null && instance.communication != null){
                     instance.communication.client.ws.CloseAsync(
@@ -577,13 +604,15 @@ namespace P2PMod
                 
             }
             instance.communication = null;
-            uConsole.Log("Disabled Client");
-            instance.clientEnabled = false;
+            instance.logBuffer.Clear();
+            GUIValues.resetMessages();
+            //uConsole.Log("Disabled Client");
+            //instance.clientEnabled = false;
         }
         public static void ConnectionInfo(){
             if (!instance.clientEnabled) return;
-            uConsole.Log($"Connected to {instance.communication.hostIP}:{instance.communication.port}");
-            uConsole.Log($"Connected to server {serverName}");
+            //uConsole.Log($"Connected to {instance.communication.hostIP}:{instance.communication.port}");
+            //uConsole.Log($"Connected to server {serverName}");
             instance.communication.SendRequest(JsonUtility.ToJson(
                 new MessageModel {
                     type = LobbyMessaging.ServerInfo
@@ -593,17 +622,13 @@ namespace P2PMod
 
         public static void KickUser(){
             if (!instance.clientEnabled){
-                uConsole.Log("You aren't connected to anything.");
+                //uConsole.Log("You aren't connected to anything.");
                 return;
             }
-            string username = uConsole.GetString();
-            var parameters = uConsole.m_Instance.GetAllParameters();
-            parameters.RemoveAt(0);
-            string reason = parameters.Join(null, " ");
            
             var content = new KickUserModel {
-                username = username,
-                reason = reason
+                username = GUIValues.kickUser,
+                reason = GUIValues.kickUserReason
             };
             var message = new MessageModel {
                 type = LobbyMessaging.KickUser,
@@ -615,10 +640,10 @@ namespace P2PMod
         }
         public static void setPassword(){
             if (!instance.clientEnabled){
-                uConsole.Log("You aren't connected to anything.");
+                //uConsole.Log("You aren't connected to anything.");
                 return;
             }
-            string password = uConsole.GetString();
+            string password = GUIValues.changingPassword;
             var content = new SetPasswordModel {
                 newPassword = password
             };
@@ -630,10 +655,16 @@ namespace P2PMod
         }
         public static void setUserCap(){
             if (!instance.clientEnabled){
-                uConsole.Log("You aren't connected to anything.");
+                //uConsole.Log("You aren't connected to anything.");
                 return;
             }
-            int userCap = uConsole.GetInt();
+            int userCap;
+            try {
+                userCap = int.Parse(GUIValues.userCap);
+            }
+            catch {
+                return;
+            }
             var content = new SetUserCapModel {
                 userCap = userCap
             };
@@ -645,10 +676,10 @@ namespace P2PMod
         }
         public static void setAcceptConnections(){
             if (!instance.clientEnabled){
-                uConsole.Log("You aren't connected to anything.");
+                //uConsole.Log("You aren't connected to anything.");
                 return;
             }
-            bool acceptingConnections = uConsole.GetBool();
+            bool acceptingConnections = GUIValues.acceptingConnections;
             var content = new SetAcceptingConnectionsModel {
                 acceptingConnections = acceptingConnections
             };
@@ -660,17 +691,16 @@ namespace P2PMod
         }
         public static void setLobbyMode(){
             if (!instance.clientEnabled){
-                uConsole.Log("You aren't connected to anything.");
+                //uConsole.Log("You aren't connected to anything.");
                 return;
             }
-            if (uConsole.GetNumParameters() == 0) return;
-            string lobby_mode = uConsole.GetString().ToLower();
+            string lobby_mode = GUIValues.lobbyMode;
             LobbyMode mode;
             if (LobbyMode.TryParse(lobby_mode, true, out mode)){
-                uConsole.Log("Changing Mode...");
+                //uConsole.Log("Changing Mode...");
             }
             else {
-                uConsole.Log("Invalid Mode! Valid modes are: public, password_locked, invite_only");
+                //uConsole.Log("Invalid Mode! Valid modes are: public, password_locked, invite_only");
                 return;
             }
 
@@ -686,14 +716,15 @@ namespace P2PMod
 
         public static void CreateInvite(){
             if (!instance.clientEnabled){
-                uConsole.Log("You aren't connected to anything.");
+                //uConsole.Log("You aren't connected to anything.");
                 return;
             }
-            int uses;
-            uses = (uConsole.GetNumParameters() == 1) ? uConsole.GetInt() : 1;
+            int uses = 1;
+            int.TryParse(GUIValues.inviteUses, out uses);
             var content = new CreateInviteModel {
                 uses = uses
             };
+            GUIValues.inviteUses = uses.ToString();
             var message = new MessageModel {
                 type = LobbyMessaging.CreateInvite,
                 content = JsonUtility.ToJson(content) 
@@ -703,11 +734,7 @@ namespace P2PMod
 
         public static void syncLayout(){
             if (!instance.clientEnabled){
-                uConsole.Log("You aren't connected to anything.");
-                return;
-            }
-            if (!instance.serverIsFrozen){
-                uConsole.Log("Changes are currently frozen.");
+                //uConsole.Log("You aren't connected to anything.");
                 return;
             }
             SyncLayoutModel layout = new SyncLayoutModel();
@@ -723,14 +750,18 @@ namespace P2PMod
                     );
                     instance.serverIsFrozen = false;
                 }
-                uConsole.Log("Force Syncing layout with all connected clients...");
+                //uConsole.Log("Force Syncing layout with all connected clients...");
                 layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
                 layout.targetAllUsers = true;
                 message.content = JsonUtility.ToJson(layout);
                 instance.communication.Lobby.SendBridgeAction(message);
                 return;
             }
-            uConsole.Log("Requesting owner for layout...");
+            if (instance.serverIsFrozen){
+                //uConsole.Log("Changes are currently frozen.");
+                return;
+            }
+            //uConsole.Log("Requesting owner for layout...");
             message.content = JsonUtility.ToJson(layout);
             instance.communication.Lobby.SendBridgeAction(message);
         }
@@ -1598,7 +1629,7 @@ namespace P2PMod
 
         
         [HarmonyPatch]
-        public static class PasueMenuPatch {
+        public static class PauseMenuPatch {
             static IEnumerable<MethodBase> TargetMethods()
             {
                 yield return AccessTools.Method(typeof(Panel_PauseMenu), "ExitToMainMenu");
@@ -1614,7 +1645,7 @@ namespace P2PMod
                     instance.Logger.LogInfo($"<CLIENT> sending {message.action} - PauseMenu");
                     instance.communication.Lobby.SendBridgeAction(message);
                     PopUpMessage.DisplayOkOnly(
-                        "Changes frozen until sync_layout is run again.", 
+                        "Changes frozen until you sync your layout with all connected users.", 
                         null
                     );
                     instance.serverIsFrozen = true;
@@ -1627,6 +1658,20 @@ namespace P2PMod
                     );
                     return false;
                 }
+            }
+        }
+        [HarmonyPatch(typeof(Panel_PauseMenu), "OnLoadGame")]
+        public static class LoadButtonPatch {
+            public static bool Prefix(){
+                if (!instance.clientEnabled || instance.serverIsFrozen) return true;
+                if (!instance.communication.isOwner){
+                    PopUpMessage.DisplayOkOnly(
+                        "Please disconnect from the active session before trying to load a layout/bridge.", 
+                        null
+                    );
+                    return false;
+                }
+                return true;
             }
         }
 

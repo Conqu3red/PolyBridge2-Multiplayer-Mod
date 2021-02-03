@@ -8,6 +8,9 @@ from hashlib import sha256
 import socket
 import time
 class MessageType:
+    # different responses for ui
+    ConnectionResponse = "ConnectionResponse"
+
     # Bridge
     BridgeAction = "BridgeAction"
     
@@ -46,6 +49,7 @@ class Lobby:
         self.lobby_mode = LobbyMode.public
         self.invites = {}
         self.clients_awaiting_layout_sync = []
+        self.frozen = False
     def isOwner(self, web_scocket):
         return web_scocket == self.clients[self.owner]
 
@@ -80,18 +84,18 @@ class MultiplayerServer(WebSocket):
                 except json.JSONDecodeError:
                     return
 
-                if message["type"] == MessageType.ServerInfo and server.isOwner(self):
+                if message["type"] == MessageType.ServerInfo:
                     mode_str = ""
                     if server.lobby_mode == LobbyMode.public: mode_str = "public" 
-                    if server.lobby_mode == LobbyMode.password_locked: mode_str = "password_locked"
-                    if server.lobby_mode == LobbyMode.invite_only: mode_str = "invite_only" 
-                    if server.lobby_mode == LobbyMode.accept_only: mode_str = "accept_only" 
+                    if server.lobby_mode == LobbyMode.password_locked: mode_str = "password locked"
+                    if server.lobby_mode == LobbyMode.invite_only: mode_str = "invite only" 
+                    if server.lobby_mode == LobbyMode.accept_only: mode_str = "accept only" # note: this mode has not been implemented yet
 
-                    console_message = f"Lobby Mode: {mode_str}\nAccepting Connections: {server.accepting_connections}\n"
-                    for user in list(server.clients.keys()):
-                        console_message += f"username: {user}\n"
-                    console_message += f"{len(list(server.clients.keys()))}/{server.user_cap} Players Connected."
-                    self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":console_message}))
+                    info = f"Players Connected ({len(list(server.clients.keys()))}/{server.user_cap}): {', '.join(list(server.clients.keys()))}"
+                    info += f"\nLobby Mode: {mode_str}"
+                    info += f"\nAccepting Connections: {server.accepting_connections}"
+                    info += f"\nChanges Frozen: {server.frozen}"
+                    self.send_message(json.dumps({"type":MessageType.ServerInfo, "content":info}))
 
                 if message["type"] == MessageType.KickUser and server.isOwner(self):
                     #print(message)
@@ -99,31 +103,33 @@ class MultiplayerServer(WebSocket):
                     user = server.clients.get(content["username"])
                     if user:
                         if content["username"] == server.owner:
-                            self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"You cannot kick yourself!"}))
+                            self.send_message(json.dumps({"type":MessageType.KickUser, "content":f"You cannot kick yourself!", "metadata":"KickUser"}))
                             return
                         user.send_message(json.dumps({"type":MessageType.PopupMessage, "content":f"You were kicked from the server. Reason: {content.get('reason') or 'No Reason Provided'}", "metadata":"server_closed"}))
                         del server.clients[content["username"]]
                         server.print(f"{content['username']} was kicked.")
-                        self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"Removed {content['username']}"}))
+                        self.send_message(json.dumps({"type":MessageType.KickUser, "content":f"Removed {content['username']}", "metadata":"KickUser"}))
                     else:
-                        self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"User not found."}))
+                        self.send_message(json.dumps({"type":MessageType.KickUser, "content":f"User not found.", "metadata":"KickUser"}))
 
 
                 if message["type"] == MessageType.ServerConfig and server.isOwner(self):
                     content = json.loads(message["content"])
+                    print(content)
                     if content.get("userCap") != None: server.user_cap = content["userCap"]
                     if content.get("acceptingConnections") != None: server.accepting_connections = content["acceptingConnections"]
                     if content.get("newPassword") != None:
-                        server.password = content["newPassword"]
+                        server.password = sha256(content["newPassword"].encode("utf-8")).hexdigest()
+                        if server.lobby_mode == LobbyMode.public: server.lobby_mode = LobbyMode.password_locked
                         server.print("Owner changed password.")
-                        self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"Changed password."}))
+                        #self.send_message(json.dumps({"type":MessageType.ServerConfig, "content":f"Changed password."}))
                     if content.get("lobbyMode") != None: server.lobby_mode = content["lobbyMode"]
 
                 if message["type"] == MessageType.CreateInvite and server.isOwner(self):
                     content = json.loads(message["content"])
                     invite = str(uuid.uuid4())
                     server.invites[invite] = content["uses"]
-                    self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":invite}))
+                    self.send_message(json.dumps({"type":MessageType.CreateInvite, "content":invite}))
 
 
                 if message["type"] == MessageType.BridgeAction:
@@ -156,6 +162,8 @@ class MultiplayerServer(WebSocket):
                                 server.print(f"Added {name} to waiting list for sync layout")
                                 server.clients[server.owner].send_message(new_message)
                             return
+                    if action_content["action"] == 12:
+                        server.frozen = json.loads(action_content["content"])
                     #server.print(action_content)
                     for name, client in server.clients.items():
                         action_content["username"] = server.getName(self)
@@ -189,19 +197,19 @@ class MultiplayerServer(WebSocket):
                     username += str(n)
                 #print(username)
                 if server.lobby_mode == LobbyMode.password_locked and server.password != sha256(password.encode("utf-8")).hexdigest():
-                    self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":"The password provided was incorrect.", "metadata":"server_closed"}))
+                    self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":"The password provided was incorrect.", "metadata":"server_closed"}))
                 elif server.lobby_mode == LobbyMode.invite_only and invite not in list(server.invites.keys()):
-                    self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":"The invite provided was invalid.", "metadata":"server_closed"}))
+                    self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":"The invite provided was invalid.", "metadata":"server_closed"}))
                 else:
                     if server.isFull():
-                        self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"Sorry but this lobby is full with {server.user_cap}/{server.user_cap} Players", "metadata":"server_closed"}))
+                        self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":f"Sorry but this lobby is full with {server.user_cap}/{server.user_cap} Players", "metadata":"server_closed"}))
                         return
                     if not server.accepting_connections:
-                        self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"This lobby is not currently accepting connections", "metadata":"server_closed"}))
+                        self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":f"This lobby is not currently accepting connections", "metadata":"server_closed"}))
                         return
 
                     server.clients[username] = self
-                    self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"Connected to server '{server_name}'", "metadata":"connected"}))
+                    self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":f"Connected to server '{server_name}'", "metadata":"connected"}))
                     for client in server.clients.values():
                         if client != self:
                             client.send_message(json.dumps({"type":"TopLeftMessage", "content":f"User '{username}' Connected"}))
@@ -218,7 +226,7 @@ class MultiplayerServer(WebSocket):
                     server.password = sha256(password.encode("utf-8")).hexdigest()
                     server.lobby_mode = LobbyMode.password_locked
                 server.clients[username] = self
-                self.send_message(json.dumps({"type":MessageType.ConsoleMessage, "content":f"Opened server {server_name}", "metadata":"owner"}))
+                self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":f"Opened server {server_name}", "metadata":"owner"}))
                 server.print(f"{username} ({self.address[0]}:{self.address[1]}) created this server.")
         except Exception as e:
             print(e)

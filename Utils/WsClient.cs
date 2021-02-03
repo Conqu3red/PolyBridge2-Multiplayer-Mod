@@ -70,6 +70,9 @@ public class WsClient
             Task.Delay(50).Wait();
         }
         Debug.Log("Connect status: " + ws.State);
+        if (ws.State == WebSocketState.Open){
+            P2PMod.P2PMod.instance.communication.Lobby.OnConnectedToServer?.Invoke();
+        }
     }
 
     #region [Status]
