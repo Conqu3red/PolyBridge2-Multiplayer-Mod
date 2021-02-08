@@ -1,6 +1,7 @@
 ﻿using UnityEngine;
 using System.IO;
 using System;
+using System.Text;
 /// <summary>
 /// Forefront class for the server communication.
 /// </summary>
@@ -31,6 +32,7 @@ public class ServerCommunication
     // Class with messages for "lobby"
     public LobbyMessaging Lobby { private set; get; }
     public string logFileName;
+    public bool ssl = false;
 
     /// <summary>
     /// Unity method called on initialization
@@ -41,7 +43,7 @@ public class ServerCommunication
         isOwner = false;
         string time = string.Format("{0:yyyy-MM-dd HH-mm-ss}", DateTime.Now);
         logFileName = $"session_{time}.log";
-        server = "ws://" + host + ":" + port + "/" + path;
+        server = ssl ? "wss" : "ws" + "://" + host + ":" + port + "/" + path;
         client = new WsClient(server);
 
         // Messaging
@@ -56,7 +58,7 @@ public class ServerCommunication
     {
         // Check if server send new messages
         var cqueue = client.receiveQueue;
-        string msg;
+        byte[] msg;
         if (Bridge.IsSimulating()) return;
         while (cqueue.TryPeek(out msg))
         {
@@ -70,12 +72,13 @@ public class ServerCommunication
     /// Method responsible for handling server messages
     /// </summary>
     /// <param name="msg">Message.</param>
-    public void HandleMessage(string msg)
+    public void HandleMessage(byte[] msg)
     {
         //Debug.Log("<CLIENT> <RECV>: " + msg);
 
         // Deserializing message from the server
-        var message = JsonUtility.FromJson<MessageModel>(msg);
+        int offset = 0;
+        var message = new MessageModel(msg, ref offset);
 
         // Picking correct method for message handling
         if (message.metadata == "server_closed"){
@@ -87,33 +90,34 @@ public class ServerCommunication
         if (message.metadata == "connected"){
             MultiplayerMod.MultiplayerMod.syncLayout();
         }
+        offset = 0;
         switch (message.type)
         {
             case LobbyMessaging.BridgeAction:
-                Lobby.OnBridgeAction?.Invoke(JsonUtility.FromJson<BridgeActionModel>(message.content));
+                Lobby.OnBridgeAction?.Invoke(new BridgeActionModel(message.content, ref offset));
                 break;
             case "ConnectionResponse":
-                MultiplayerMod.MultiplayerMod.GUIValues.ConnectionResponse = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.ConnectionResponse = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
                 break;
             case LobbyMessaging.ServerInfo:
-                MultiplayerMod.MultiplayerMod.GUIValues.serverInfoString = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.serverInfoString = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
                 break;
             case LobbyMessaging.KickUser:
-                MultiplayerMod.MultiplayerMod.GUIValues.kickResponse = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.kickResponse = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
                 break;
             case LobbyMessaging.ServerConfig:
-                MultiplayerMod.MultiplayerMod.GUIValues.ConfigResponse = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.ConfigResponse = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
                 break;
             case LobbyMessaging.CreateInvite:
-                MultiplayerMod.MultiplayerMod.GUIValues.InviteResponse = message.content;
+                MultiplayerMod.MultiplayerMod.GUIValues.InviteResponse = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
                 break;
 
             case LobbyMessaging.PopupMessage:
-                PopUpMessage.DisplayOkOnly(message.content, null);
+                PopUpMessage.DisplayOkOnly(MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content), null);
                 if (isOwner) MultiplayerMod.MultiplayerMod.ActionLog($"Popup Message - {message.content}");
                 break;
             case LobbyMessaging.TopLeftMessage:
-                GameUI.ShowMessage(ScreenMessageLocation.TOP_LEFT, message.content, 3f);
+                GameUI.ShowMessage(ScreenMessageLocation.TOP_LEFT, MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content), 3f);
                 if (isOwner) MultiplayerMod.MultiplayerMod.ActionLog($"Info Message - {message.content}");
                 break;
             default:
@@ -147,7 +151,7 @@ public class ServerCommunication
     /// Method which sends data through websocket
     /// </summary>
     /// <param name="message">Message.</param>
-    public void SendRequest(string message)
+    public void SendRequest(byte[] message)
     {
         client.Send(message);
     }

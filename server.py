@@ -7,6 +7,11 @@ import traceback
 from hashlib import sha256
 import socket
 import time
+import ssl
+import sys
+from optparse import OptionParser
+from StructureModels import *
+
 class MessageType:
     # different responses for ui
     ConnectionResponse = "ConnectionResponse"
@@ -32,11 +37,6 @@ class LobbyMode:
     invite_only = 2
     accept_only = 3
 
-def keyboardInterruptHandler(signal, frame):
-    print("KeyboardInterrupt (ID: {}) has been caught. Cleaning up...".format(signal))
-    print("Clean up complete, terminating...")
-    exit(0)
-signal.signal(signal.SIGINT, keyboardInterruptHandler)
 
 class Lobby:
     def __init__(self, name, owner):
@@ -61,8 +61,8 @@ class Lobby:
 
     def close(self):
         for client in self.clients.values():
-            client.send_message(json.dumps({"type":MessageType.PopupMessage, "content":"The server was closed by the host.", "metadata":"server_closed"}))
-        #self.clients[self.owner].send_message(json.dumps({"type":"PopupMessage", "content":"Server Closed."}))
+            client.send_message(Message.Serialize({"type":MessageType.PopupMessage, "content":stringResponse("The server was closed by the host."), "metadata":"server_closed"}))
+        #self.clients[self.owner].send_message(Message.Serialize({"type":"PopupMessage", "content":"Server Closed."}))
     def print(self, value):
         print(f"{self.name} - {value}")
         
@@ -75,15 +75,11 @@ class MultiplayerServer(WebSocket):
             parameters = dict(parse.parse_qsl(parse.urlsplit(self.request.path).query))
             username = parameters.get("username")
             server = open_lobbies[server_name]
-            #print(self.data)
+            #print(bytes(self.data))
             if server:
                 if self not in list(server.clients.values()): return
-                try:
-                    message = json.loads(self.data)
-                    #print(message)
-                except json.JSONDecodeError:
-                    return
-
+                message = Message.Deserialize(bytes(self.data))
+                #print(message)
                 if message["type"] == MessageType.ServerInfo:
                     mode_str = ""
                     if server.lobby_mode == LobbyMode.public: mode_str = "public" 
@@ -95,53 +91,53 @@ class MultiplayerServer(WebSocket):
                     info += f"\nLobby Mode: {mode_str}"
                     info += f"\nAccepting Connections: {server.accepting_connections}"
                     info += f"\nChanges Frozen: {server.frozen}"
-                    self.send_message(json.dumps({"type":MessageType.ServerInfo, "content":info}))
+                    self.send_message(Message.Serialize({"type":MessageType.ServerInfo, "content":stringResponse(info)}))
 
                 if message["type"] == MessageType.KickUser and server.isOwner(self):
                     #print(message)
-                    content = json.loads(message["content"])
+                    content = KickUserModel.Deserialize(message["content"])
                     user = server.clients.get(content["username"])
                     if user:
                         if content["username"] == server.owner:
-                            self.send_message(json.dumps({"type":MessageType.KickUser, "content":f"You cannot kick yourself!", "metadata":"KickUser"}))
+                            self.send_message(Message.Serialize({"type":MessageType.KickUser, "content":stringResponse(f"You cannot kick yourself!"), "metadata":"KickUser"}))
                             return
-                        user.send_message(json.dumps({"type":MessageType.PopupMessage, "content":f"You were kicked from the server. Reason: {content.get('reason') or 'No Reason Provided'}", "metadata":"server_closed"}))
+                        user.send_message(Message.Serialize({"type":MessageType.PopupMessage, "content":stringResponse(f"You were kicked from the server. Reason: {content.get('reason') or 'No Reason Provided'}"), "metadata":"server_closed"}))
                         del server.clients[content["username"]]
                         server.print(f"{content['username']} was kicked.")
-                        self.send_message(json.dumps({"type":MessageType.KickUser, "content":f"Removed {content['username']}", "metadata":"KickUser"}))
+                        self.send_message(Message.Serialize({"type":MessageType.KickUser, "content":stringResponse(f"Removed {content['username']}"), "metadata":"KickUser"}))
                     else:
-                        self.send_message(json.dumps({"type":MessageType.KickUser, "content":f"User not found.", "metadata":"KickUser"}))
+                        self.send_message(Message.Serialize({"type":MessageType.KickUser, "content":stringResponse(f"User not found."), "metadata":"KickUser"}))
 
 
                 if message["type"] == MessageType.ServerConfig and server.isOwner(self):
-                    content = json.loads(message["content"])
+                    content = ServerConfigModel.Deserialize(message["content"])
                     #print(content)
-                    if content.get("userCap") != None: server.user_cap = content["userCap"]
-                    if content.get("acceptingConnections") != None: server.accepting_connections = content["acceptingConnections"]
-                    if content.get("newPassword") != None:
+                    if content["action"] == 0: server.user_cap = content["userCap"]
+                    if content["action"] == 1: server.accepting_connections = content["acceptingConnections"]
+                    if content["action"] == 2:
                         server.password = sha256(content["newPassword"].encode("utf-8")).hexdigest()
                         if server.lobby_mode == LobbyMode.public: server.lobby_mode = LobbyMode.password_locked
                         server.print("Owner changed password.")
-                        #self.send_message(json.dumps({"type":MessageType.ServerConfig, "content":f"Changed password."}))
-                    if content.get("lobbyMode") != None: server.lobby_mode = content["lobbyMode"]
+                        self.send_message(Message.Serialize({"type":MessageType.ServerConfig, "content":stringResponse(f"Changed password.")}))
+                    if content["action"] == 3: server.lobby_mode = content["lobbyMode"]
 
                 if message["type"] == MessageType.CreateInvite and server.isOwner(self):
-                    content = json.loads(message["content"])
+                    uses = int.from_bytes(message["content"], "little")
                     invite = str(uuid.uuid4())
-                    server.invites[invite] = content["uses"]
-                    self.send_message(json.dumps({"type":MessageType.CreateInvite, "content":invite}))
+                    server.invites[invite] = uses
+                    self.send_message(Message.Serialize({"type":MessageType.CreateInvite, "content":stringResponse(invite)}))
 
 
                 if message["type"] == MessageType.BridgeAction:
-                    action_content = json.loads(message["content"])
+                    action_content = BridgeActionModel.Deserialize(message["content"])
                     if action_content["action"] == 11:
-                        layout = json.loads(action_content["content"])
+                        layout = LayoutModel.Deserialize(action_content["content"])
                         if server.isOwner(self):
                             server.print("Host syncing layout with all users requested.")
                             if not layout["targetAllUsers"]:
                                 action_content["username"] = server.getName(self)
-                                message["content"] = json.dumps(action_content)
-                                new_message = json.dumps(message)
+                                message["content"] = BridgeActionModel.Serialize(action_content)
+                                new_message = Message.Serialize(message)
                                 
                                 while len(server.clients_awaiting_layout_sync) > 0:
                                     name = server.clients_awaiting_layout_sync.pop()
@@ -155,28 +151,29 @@ class MultiplayerServer(WebSocket):
                             name = server.getName(self)
                             if name not in server.clients_awaiting_layout_sync:
                                 action_content["username"] = server.getName(self)
-                                message["content"] = json.dumps(action_content)
-                                new_message = json.dumps(message)
+                                message["content"] = BridgeActionModel.Serialize(action_content)
+                                new_message = Message.Serialize(message)
                                 
                                 server.clients_awaiting_layout_sync.append(name)
                                 server.print(f"Added {name} to waiting list for sync layout")
                                 server.clients[server.owner].send_message(new_message)
                             return
                     if action_content["action"] == 12:
-                        server.frozen = json.loads(action_content["content"])
+                        server.frozen = bool.from_bytes(action_content["content"], "little")
                     #server.print(action_content)
                     for name, client in server.clients.items():
                         action_content["username"] = server.getName(self)
-                        message["content"] = json.dumps(action_content)
-                        new_message = json.dumps(message)
+                        message["content"] = BridgeActionModel.Serialize(action_content)
+                        new_message = Message.Serialize(message)
                         
                         if client != self:
                             #print(f"sending to {name}")
                             client.send_message(new_message)
                         
         except Exception as e:
-            pass
+            print(e)
             traceback.print_tb(e.__traceback__)
+            pass
     def connected(self):
         try:
             server_name = parse.urlsplit(self.request.path).path.replace("/", "")
@@ -197,22 +194,22 @@ class MultiplayerServer(WebSocket):
                     username += str(n)
                 #print(username)
                 if server.lobby_mode == LobbyMode.password_locked and server.password != sha256(password.encode("utf-8")).hexdigest():
-                    self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":"The password provided was incorrect.", "metadata":"server_closed"}))
+                    self.send_message(Message.Serialize({"type":MessageType.ConnectionResponse, "content":stringResponse("The password provided was incorrect."), "metadata":"server_closed"}))
                 elif server.lobby_mode == LobbyMode.invite_only and invite not in list(server.invites.keys()):
-                    self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":"The invite provided was invalid.", "metadata":"server_closed"}))
+                    self.send_message(Message.Serialize({"type":MessageType.ConnectionResponse, "content":stringResponse("The invite provided was invalid."), "metadata":"server_closed"}))
                 else:
                     if server.isFull():
-                        self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":f"Sorry but this lobby is full with {server.user_cap}/{server.user_cap} Players", "metadata":"server_closed"}))
+                        self.send_message(Message.Serialize({"type":MessageType.ConnectionResponse, "content":stringResponse(f"Sorry but this lobby is full with {server.user_cap}/{server.user_cap} Players"), "metadata":"server_closed"}))
                         return
                     if not server.accepting_connections:
-                        self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":f"This lobby is not currently accepting connections", "metadata":"server_closed"}))
+                        self.send_message(Message.Serialize({"type":MessageType.ConnectionResponse, "content":stringResponse(f"This lobby is not currently accepting connections"), "metadata":"server_closed"}))
                         return
 
                     server.clients[username] = self
-                    self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":f"Connected to server '{server_name}'", "metadata":"connected"}))
+                    self.send_message(Message.Serialize({"type":MessageType.ConnectionResponse, "content":stringResponse(f"Connected to server '{server_name}'"), "metadata":"connected"}))
                     for client in server.clients.values():
                         if client != self:
-                            client.send_message(json.dumps({"type":"TopLeftMessage", "content":f"User '{username}' Connected"}))
+                            client.send_message(Message.Serialize({"type":"TopLeftMessage", "content":stringResponse(f"User '{username}' Connected")}))
                     server.print(f"{username} ({self.address[0]}:{self.address[1]}) connected.")
                     if invite:
                         server.invites[invite] -= 1
@@ -226,10 +223,11 @@ class MultiplayerServer(WebSocket):
                     server.password = sha256(password.encode("utf-8")).hexdigest()
                     server.lobby_mode = LobbyMode.password_locked
                 server.clients[username] = self
-                self.send_message(json.dumps({"type":MessageType.ConnectionResponse, "content":f"Opened server {server_name}", "metadata":"owner"}))
+                self.send_message(Message.Serialize({"type":MessageType.ConnectionResponse, "content":stringResponse(f"Opened server {server_name}"), "metadata":"owner"}))
                 server.print(f"{username} ({self.address[0]}:{self.address[1]}) created this server.")
         except Exception as e:
             print(e)
+            traceback.print_tb(e.__traceback__)
             pass
     def handle_close(self):
         for name, server in open_lobbies.items():
@@ -244,14 +242,35 @@ class MultiplayerServer(WebSocket):
                     
                     for _client in server.clients.values():
                         if _client != self:
-                            _client.send_message(json.dumps({"type":MessageType.TopLeftMessage, "content":f"User '{name}' Disconnected."}))
+                            _client.send_message(Message.Serialize({"type":MessageType.TopLeftMessage, "content":stringResponse(f"User '{name}' Disconnected.")}))
                     
                     del server.clients[name]
 
 
 open_lobbies = {}
 address = socket.gethostbyname(socket.gethostname())
-port = 11000
-print(f"Running at {address}:{port}")
-server = WebSocketServer(address, port, MultiplayerServer)
+
+parser = OptionParser(usage='usage: %prog [options]', version='%prog 1.0.0')
+parser.add_option('--ssl', default=0, type='int', action='store', dest='ssl', help='ssl (1: on, 0: off (default))')
+parser.add_option('--cert', default='./cert.pem', type='string', action='store', dest='cert', help='cert (./cert.pem)')
+parser.add_option('--key', default='./key.pem', type='string', action='store', dest='key', help='key (./key.pem)')
+parser.add_option('--ver', default=ssl.PROTOCOL_TLSv1, type=int, action='store', dest='ver', help='ssl version')
+parser.add_option('--localhost', default=False, action='store_true', dest='localhost', help='whether to use localhost')
+parser.add_option('--port', default=11000, type=int, action='store', dest='port', help='server port')
+(options, args) = parser.parse_args()
+
+sslopts = {}
+if options.ssl == 1:
+    sslopts = dict(certfile=options.cert, keyfile=options.key, ssl_version=options.ver)
+if options.localhost: address = "127.0.0.1"
+print(f"Running at {address}:{options.port} {'(using TLS/SSL)' if options.ssl == 1 else '(not using TLS/SSL)'}")
+server = WebSocketServer(address, options.port, MultiplayerServer, **sslopts)
+
+def keyboardInterruptHandler(signal, frame):
+    print("KeyboardInterrupt (ID: {}) has been caught. Cleaning up...".format(signal))
+    server.close()
+    print("Clean up complete, terminating...")
+    sys.exit()
+signal.signal(signal.SIGINT, keyboardInterruptHandler)
+
 server.serve_forever()

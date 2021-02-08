@@ -126,6 +126,9 @@ namespace MultiplayerMod
                         GUILayout.Label("(optional) Session Invite:");
                         GUIValues.invite = GUILayout.PasswordField(GUIValues.invite, '*', GUILayout.Width(inputWidth));
                     });
+                    Horizontal(() => {
+                        GUIValues.secureConnection = GUILayout.Toggle(GUIValues.secureConnection, "Connect using TLS/SSL");
+                    });
                     if (clientConnecting){
                         GUILayout.Button("Connecting...");
                     }
@@ -294,6 +297,7 @@ namespace MultiplayerMod
             public static string InviteResponse = "";
             public static string inviteUses = "1";
             public static string lobbyMode = "";
+            public static bool secureConnection = false;
             public static void resetMessages(){
                 GUIValues.ConnectionResponse = "";
                 GUIValues.InviteResponse = "";

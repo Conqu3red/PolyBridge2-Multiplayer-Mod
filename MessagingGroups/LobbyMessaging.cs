@@ -48,8 +48,8 @@ public class LobbyMessaging : BaseMessaging
         var message = new MessageModel
         {
             type = BridgeAction,
-            content = JsonUtility.ToJson(request)
+            content = request.Serialize()
         };
-        client.SendRequest(JsonUtility.ToJson(message));
+        client.SendRequest(message.Serialize());
     }
 }

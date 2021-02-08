@@ -39,3 +39,4 @@ build.bat
 *.pem
 #other
 env
+__pycache__

@@ -12,6 +12,7 @@ using System.Net.WebSockets;
 using System.Threading;
 using UnityEngine.UI;
 using System.IO;
+using System.Text;
 
 namespace MultiplayerMod
 {
@@ -24,7 +25,7 @@ namespace MultiplayerMod
     {
         public new const string
             PluginGuid = "org.bepinex.plugins.MultiplayerMod",
-            PluginName = "P2P Mod",
+            PluginName = "Multiplayer Mod",
             PluginVersion = "1.0.0";
         
         public static ConfigDefinition
@@ -81,6 +82,8 @@ namespace MultiplayerMod
             harmony = new Harmony("org.bepinex.plugins.MultiplayerMod");
             harmony.PatchAll(Assembly.GetExecutingAssembly());
 
+            this.authors = new string[] {"Conqu3red"};
+
             PolyTechMain.registerMod(this);
         }
 
@@ -130,6 +133,7 @@ namespace MultiplayerMod
             PistonProxy pistonProxy;
             BridgeJointProxy jointProxy;
             BridgeJoint joint;
+            int offset = 0;
             instance.Logger.LogInfo($"<CLIENT> received {message.action}");
             
             
@@ -141,7 +145,7 @@ namespace MultiplayerMod
             // switch to handle actions
             switch (message.action){
                 case actionType.CREATE_EDGE:
-                    edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
+                    edgeProxy = new BridgeEdgeProxy(message.content, ref offset);
                     //BridgeEdges.CreateEdgeFromProxy(edgeProxy);
 
                     edge = BridgeEdges.FindDisabledEdgeByJointGuids(
@@ -187,7 +191,7 @@ namespace MultiplayerMod
                     break;
                 
                 case actionType.CREATE_JOINT:
-                    jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    jointProxy = new BridgeJointProxy(25, message.content, ref offset);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
 	                if (joint)
 	                {
@@ -199,7 +203,7 @@ namespace MultiplayerMod
                     instance.ClientRecieving[actionType.CREATE_JOINT] = false;
                     break;
                 case actionType.DELETE_EDGE:
-                    edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
+                    edgeProxy = new BridgeEdgeProxy(message.content, ref offset);
                     edge = BridgeEdges.FindEnabledEdgeByJointGuids(edgeProxy.m_NodeA_Guid, edgeProxy.m_NodeB_Guid, edgeProxy.m_Material);
                     if (edge){
                         edge.ForceDisable();
@@ -208,14 +212,14 @@ namespace MultiplayerMod
                     BridgeJoints.DeleteOrphanedJoints();
                     break;
                 case actionType.DELETE_JOINT:
-                    jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    jointProxy = new BridgeJointProxy(25, message.content, ref offset);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
                     if (joint){
                         joint.gameObject.SetActive(false);
                     }
                     break;
                 case actionType.TRANSLATE_JOINT:
-                    jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    jointProxy = new BridgeJointProxy(25, message.content, ref offset);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
                     if (joint){
                         joint.transform.position = jointProxy.m_Pos;
@@ -224,7 +228,7 @@ namespace MultiplayerMod
                     }
                     break;
                 case actionType.SPRING_SLIDER_TRANSLATE:
-                    springProxy = JsonUtility.FromJson<BridgeSpringProxy>(message.content);
+                    springProxy = new BridgeSpringProxy(message.content, ref offset);
                     var spring = BridgeEdges.FindEnabledEdgeByJointGuids(
                         springProxy.m_NodeA_Guid,
                         springProxy.m_NodeB_Guid,
@@ -238,7 +242,7 @@ namespace MultiplayerMod
                     }
                     break;
                 case actionType.PISTON_SLIDER_TRANSLATE:
-                    pistonProxy = JsonUtility.FromJson<PistonProxy>(message.content);
+                    pistonProxy = new PistonProxy(25, message.content, ref offset);
                     var piston = Pistons.GetPistonOnEdge(BridgeEdges.FindEnabledEdgeByJointGuids(
                         pistonProxy.m_NodeA_Guid,
                         pistonProxy.m_NodeB_Guid,
@@ -250,7 +254,7 @@ namespace MultiplayerMod
                     }
                     break;
                 case actionType.SPLIT_JOINT:
-                    jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    jointProxy = new BridgeJointProxy(25, message.content, ref offset);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
                     if (joint){
                         instance.ClientRecieving[actionType.SPLIT_JOINT] = true;
@@ -260,7 +264,7 @@ namespace MultiplayerMod
                     }
                     break;
                 case actionType.UNSPLIT_JOINT:
-                    jointProxy = JsonUtility.FromJson<BridgeJointProxy>(message.content);
+                    jointProxy = new BridgeJointProxy(25, message.content, ref offset);
                     joint = BridgeJoints.FindByGuid(jointProxy.m_Guid);
                     if (joint){
                         instance.ClientRecieving[actionType.UNSPLIT_JOINT] = true;
@@ -269,7 +273,7 @@ namespace MultiplayerMod
                     }
                     break;
                 case actionType.SPLIT_MODIFY:
-                    edgeProxy = JsonUtility.FromJson<BridgeEdgeProxy>(message.content);
+                    edgeProxy = new BridgeEdgeProxy(message.content, ref offset);
                     edge = BridgeEdges.FindEnabledEdgeByJointGuids(edgeProxy.m_NodeA_Guid, edgeProxy.m_NodeB_Guid, edgeProxy.m_Material);
                     if (edge){
                         edge.m_JointAPart = edgeProxy.m_JointAPart;
@@ -278,7 +282,7 @@ namespace MultiplayerMod
                     }
                     break;
                 case actionType.HYDRAULIC_CONTROLLER_ACTION:
-                    HydraulicsControllerActionModel content = JsonUtility.FromJson<HydraulicsControllerActionModel>(message.content);
+                    HydraulicsControllerActionModel content = new HydraulicsControllerActionModel(message.content, ref offset);
                     instance.Logger.LogInfo("- " + content.action.ToString());
                     // figure out what phases we are applying this to
                     List<HydraulicsControllerPhase> phases = new List<HydraulicsControllerPhase> ();
@@ -418,11 +422,11 @@ namespace MultiplayerMod
                     if (instance.communication.isOwner){
                         instance.Logger.LogInfo("sending layout as requested");
                         layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
-                        _message.content = JsonUtility.ToJson(layout);
+                        _message.content = layout.Serialize();
                         instance.communication.Lobby.SendBridgeAction(_message);
                         break;
                     }
-                    layout = JsonUtility.FromJson<SyncLayoutModel>(message.content);
+                    layout = new SyncLayoutModel(message.content, ref offset);
                     preventSendActions = true;
                     int num = 0;
 			        var result = new SandboxLayoutData(layout.layoutData, ref num);
@@ -441,7 +445,7 @@ namespace MultiplayerMod
                     break;
 
                 case actionType.FREEZE:
-                    serverIsFrozen = message.content == "true" ? true : false;
+                    serverIsFrozen = message.content == new byte[] {1} ? true : false;
                     instance.Logger.LogInfo(serverIsFrozen);
                     if (serverIsFrozen){
                         PopUpMessage.DisplayOkOnly("Changes frozen by host.", null);
@@ -570,6 +574,7 @@ namespace MultiplayerMod
             if (password != "") instance.communication.path += $"&password={password}";
             if (invite != "") instance.communication.path += $"&invite={invite}";
             instance.communication.port = port;
+            instance.communication.ssl = GUIValues.secureConnection;
             instance.communication.Init();
             instance.communication.Lobby.OnConnectedToServer += instance.OnConnectedToServer;
             instance.communication.ConnectToServer();
@@ -602,11 +607,11 @@ namespace MultiplayerMod
             if (!instance.clientEnabled) return;
             //uConsole.Log($"Connected to {instance.communication.hostIP}:{instance.communication.port}");
             //uConsole.Log($"Connected to server {serverName}");
-            instance.communication.SendRequest(JsonUtility.ToJson(
+            instance.communication.SendRequest(
                 new MessageModel {
                     type = LobbyMessaging.ServerInfo
-                }
-            ));
+                }.Serialize()
+            );
         }
 
         public static void KickUser(){
@@ -621,11 +626,11 @@ namespace MultiplayerMod
             };
             var message = new MessageModel {
                 type = LobbyMessaging.KickUser,
-                content = JsonUtility.ToJson(content) 
+                content = content.Serialize()
             };
 
             
-            instance.communication.SendRequest(JsonUtility.ToJson(message));
+            instance.communication.SendRequest(message.Serialize());
         }
         public static void setPassword(){
             if (!instance.clientEnabled){
@@ -633,14 +638,15 @@ namespace MultiplayerMod
                 return;
             }
             string password = GUIValues.changingPassword;
-            var content = new SetPasswordModel {
+            var content = new ServerConfigModel {
+                action = ConfigAction.CHANGE_PASSWORD,
                 newPassword = password
             };
             var message = new MessageModel {
                 type = LobbyMessaging.ServerConfig,
-                content = JsonUtility.ToJson(content) 
+                content = content.Serialize()
             };
-            instance.communication.SendRequest(JsonUtility.ToJson(message));
+            instance.communication.SendRequest(message.Serialize());
         }
         public static void setUserCap(){
             if (!instance.clientEnabled){
@@ -654,14 +660,15 @@ namespace MultiplayerMod
             catch {
                 return;
             }
-            var content = new SetUserCapModel {
+            var content = new ServerConfigModel {
+                action = ConfigAction.USER_CAP,
                 userCap = userCap
             };
             var message = new MessageModel {
                 type = LobbyMessaging.ServerConfig,
-                content = JsonUtility.ToJson(content) 
+                content = content.Serialize() 
             };
-            instance.communication.SendRequest(JsonUtility.ToJson(message));
+            instance.communication.SendRequest(message.Serialize());
         }
         public static void setAcceptConnections(){
             if (!instance.clientEnabled){
@@ -669,14 +676,15 @@ namespace MultiplayerMod
                 return;
             }
             bool acceptingConnections = GUIValues.acceptingConnections;
-            var content = new SetAcceptingConnectionsModel {
+            var content = new ServerConfigModel {
+                action = ConfigAction.ACCEPTING_CONNECTIONS,
                 acceptingConnections = acceptingConnections
             };
             var message = new MessageModel {
                 type = LobbyMessaging.ServerConfig,
-                content = JsonUtility.ToJson(content) 
+                content = content.Serialize() 
             };
-            instance.communication.SendRequest(JsonUtility.ToJson(message));
+            instance.communication.SendRequest(message.Serialize());
         }
         public static void setLobbyMode(){
             if (!instance.clientEnabled){
@@ -693,14 +701,15 @@ namespace MultiplayerMod
                 return;
             }
 
-            var content = new SetLobbyModeModel {
+            var content = new ServerConfigModel {
+                action = ConfigAction.CHANGE_LOBBY_MODE,
                 lobbyMode = mode
             };
             var message = new MessageModel {
                 type = LobbyMessaging.ServerConfig,
-                content = JsonUtility.ToJson(content) 
+                content = content.Serialize()
             };
-            instance.communication.SendRequest(JsonUtility.ToJson(message));
+            instance.communication.SendRequest(message.Serialize());
         }
 
         public static void CreateInvite(){
@@ -710,15 +719,13 @@ namespace MultiplayerMod
             }
             int uses = 1;
             int.TryParse(GUIValues.inviteUses, out uses);
-            var content = new CreateInviteModel {
-                uses = uses
-            };
+            
             GUIValues.inviteUses = uses.ToString();
             var message = new MessageModel {
                 type = LobbyMessaging.CreateInvite,
-                content = JsonUtility.ToJson(content) 
+                content = BitConverter.GetBytes(uses) 
             };
-            instance.communication.SendRequest(JsonUtility.ToJson(message));
+            instance.communication.SendRequest(message.Serialize());
         }
 
         public static void syncLayout(){
@@ -734,7 +741,7 @@ namespace MultiplayerMod
                     instance.communication.Lobby.SendBridgeAction(
                         new BridgeActionModel {
                             action = actionType.FREEZE,
-                            content = "false"
+                            content = BitConverter.GetBytes(false)
                         }
                     );
                     instance.serverIsFrozen = false;
@@ -742,7 +749,7 @@ namespace MultiplayerMod
                 //uConsole.Log("Force Syncing layout with all connected clients...");
                 layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
                 layout.targetAllUsers = true;
-                message.content = JsonUtility.ToJson(layout);
+                message.content = layout.Serialize();
                 instance.communication.Lobby.SendBridgeAction(message);
                 return;
             }
@@ -751,7 +758,7 @@ namespace MultiplayerMod
                 return;
             }
             //uConsole.Log("Requesting owner for layout...");
-            message.content = JsonUtility.ToJson(layout);
+            message.content = layout.Serialize();
             instance.communication.Lobby.SendBridgeAction(message);
         }
 
@@ -815,7 +822,7 @@ namespace MultiplayerMod
                 var edge = new BridgeEdgeProxy(__result);
                 var message = new BridgeActionModel {
                     action = actionType.CREATE_EDGE,
-                    content = JsonUtility.ToJson(edge)
+                    content = edge.SerializeBinary()
                 };
                 instance.Logger.LogInfo("<CLIENT> sending CREATE_EDGE");
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -839,7 +846,7 @@ namespace MultiplayerMod
                 var joint = new BridgeJointProxy(__result);
                 var message = new BridgeActionModel {
                     action = actionType.CREATE_JOINT,
-                    content = JsonUtility.ToJson(joint)
+                    content = joint.SerializeBinary()
                 };
                 instance.Logger.LogInfo("<CLIENT> sending CREATE_JOINT");
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -891,7 +898,7 @@ namespace MultiplayerMod
                     var joint = new BridgeJointProxy(j);
                     var message = new BridgeActionModel {
                         action = actionType.DELETE_JOINT,
-                        content = JsonUtility.ToJson(joint)
+                        content = joint.SerializeBinary()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending DELETE_JOINT");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -901,7 +908,7 @@ namespace MultiplayerMod
                     var joint = new BridgeEdgeProxy(e);
                     var message = new BridgeActionModel {
                         action = actionType.DELETE_EDGE,
-                        content = JsonUtility.ToJson(joint)
+                        content = joint.SerializeBinary()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending DELETE_EDGE");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -922,7 +929,7 @@ namespace MultiplayerMod
                         joint.m_Pos = BridgeJointMovement.m_SelectedJoint.transform.position;
                         var message = new BridgeActionModel {
                             action = actionType.TRANSLATE_JOINT,
-                            content = JsonUtility.ToJson(joint)
+                            content = joint.SerializeBinary()
                         };
                         instance.Logger.LogInfo("<CLIENT> sending TRANSLATE_JOINT");
                         instance.communication.Lobby.SendBridgeAction(message);
@@ -941,7 +948,7 @@ namespace MultiplayerMod
                             var spring = new BridgeSpringProxy(BridgeSprings.m_SliderFollowingMouse.m_BridgeSpring);
                             var message = new BridgeActionModel {
                                 action = actionType.SPRING_SLIDER_TRANSLATE,
-                                content = JsonUtility.ToJson(spring)
+                                content = spring.SerializeBinary()
                             };
                             instance.Logger.LogInfo("<CLIENT> sending SPRING_SLIDER_TRANSLATE");
                             instance.communication.Lobby.SendBridgeAction(message);
@@ -963,7 +970,7 @@ namespace MultiplayerMod
                             var piston = new PistonProxy(Pistons.m_SliderFollowingMouse.m_Piston);
                             var message = new BridgeActionModel {
                                 action = actionType.PISTON_SLIDER_TRANSLATE,
-                                content = JsonUtility.ToJson(piston)
+                                content = piston.SerializeBinary()
                             };
                             instance.Logger.LogInfo("<CLIENT> sending SPRING_SLIDER_TRANSLATE");
                             instance.communication.Lobby.SendBridgeAction(message);
@@ -995,7 +1002,7 @@ namespace MultiplayerMod
 
                 var message = new BridgeActionModel {
                     action = action,
-                    content = JsonUtility.ToJson(new BridgeJointProxy(joint))
+                    content = new BridgeJointProxy(joint).SerializeBinary()
                 };
                 
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -1008,7 +1015,7 @@ namespace MultiplayerMod
                 var edge = new BridgeEdgeProxy(__instance.m_Edge);
                 var message = new BridgeActionModel {
                     action = actionType.SPLIT_MODIFY,
-                    content = JsonUtility.ToJson(edge)
+                    content = edge.SerializeBinary()
                 };
                 
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -1035,7 +1042,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddSplitJointToPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1061,7 +1068,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddAllSplitJointsToPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1086,7 +1093,7 @@ namespace MultiplayerMod
                 };
 	            var message = new BridgeActionModel {
                     action = action,
-                    content = JsonUtility.ToJson(content)
+                    content = content.Serialize()
                 };
                 instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddSplitJointToAllPhasesAcceptingNewAdditions");
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -1112,7 +1119,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveSplitJointFromPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1137,7 +1144,7 @@ namespace MultiplayerMod
                 };
 	            var message = new BridgeActionModel {
                     action = action,
-                    content = JsonUtility.ToJson(content)
+                    content = content.Serialize()
                 };
                 instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveSplitJointFromAllPhases");
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -1161,7 +1168,7 @@ namespace MultiplayerMod
         //        };
 	    //        var message = new BridgeActionModel {
         //            action = action,
-        //            content = JsonUtility.ToJson(content)
+        //            content = content.Serialize()
         //        };
         //        instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveJointFromAllPhases");
         //        instance.communication.Lobby.SendBridgeAction(message);
@@ -1186,7 +1193,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveSplitJointFromPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1215,7 +1222,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - SetSplitJointStateForPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1242,7 +1249,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - ToggleSplitJoint");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1268,7 +1275,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddPistonToHydraulicsPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1295,7 +1302,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddAllPistonsToPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1320,7 +1327,7 @@ namespace MultiplayerMod
                 };
 	            var message = new BridgeActionModel {
                     action = action,
-                    content = JsonUtility.ToJson(content)
+                    content = content.Serialize()
                 };
                 instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddPistonToHydraulicsPhase");
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -1347,7 +1354,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - RemoveAllPistonsFromPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1370,7 +1377,7 @@ namespace MultiplayerMod
                 };
 	            var message = new BridgeActionModel {
                     action = action,
-                    content = JsonUtility.ToJson(content)
+                    content = content.Serialize()
                 };
                 instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - AddPistonToHydraulicsPhase");
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -1398,7 +1405,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - TogglePiston");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1422,7 +1429,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - DisableNewAdditionsFromPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1446,7 +1453,7 @@ namespace MultiplayerMod
                     };
 	            	var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(content)
+                        content = content.Serialize()
                     };
                     instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - EnableNewAdditionsFromPhase");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1466,7 +1473,7 @@ namespace MultiplayerMod
                 };
                 var message = new BridgeActionModel {
                     action = action,
-                    content = JsonUtility.ToJson(content)
+                    content = content.Serialize()
                 };
                 instance.Logger.LogInfo("<CLIENT> sending HYDRAULIC_CONTROLLER_ACTION - OnThreeWayJointsToggle");
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -1484,7 +1491,7 @@ namespace MultiplayerMod
 		        {
                     var message = new BridgeActionModel {
                         action = action,
-                        content = JsonUtility.ToJson(new BridgeJointProxy(pastedJoint))
+                        content = new BridgeJointProxy(pastedJoint).SerializeBinary()
                     };
                     instance.communication.Lobby.SendBridgeAction(message);
                 }
@@ -1560,52 +1567,52 @@ namespace MultiplayerMod
             switch (action){
                 case actionType.CREATE_EDGE:
                     message.action = actionType.DELETE_EDGE;
-                    message.content = JsonUtility.ToJson(packet.m_Edge);
+                    message.content = packet.m_Edge.SerializeBinary();
                     break;
                 
                 case actionType.CREATE_JOINT:
                     message.action = actionType.DELETE_JOINT;
-                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    message.content = packet.m_Joint.SerializeBinary();
                     break;
                 
                 case actionType.DELETE_EDGE:
                     message.action = actionType.CREATE_EDGE;
-                    message.content = JsonUtility.ToJson(packet.m_Edge);
+                    message.content = packet.m_Edge.SerializeBinary();
                     break;
                 
                 case actionType.DELETE_JOINT:
                     message.action = actionType.CREATE_JOINT;
-                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    message.content = packet.m_Joint.SerializeBinary();
                     break;
                 
                 case actionType.SPLIT_JOINT:
                     message.action = actionType.UNSPLIT_JOINT;
-                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    message.content = packet.m_Joint.SerializeBinary();
                     break;
 
                 case actionType.UNSPLIT_JOINT:
                     message.action = actionType.SPLIT_JOINT;
-                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    message.content = packet.m_Joint.SerializeBinary();
                     break;
                 
                 case actionType.TRANSLATE_JOINT:
                     message.action = actionType.TRANSLATE_JOINT;
                     packet.m_Joint.m_Pos = BridgeJoints.FindByGuid(packet.m_Joint.m_Guid).m_BuildPos;
-                    message.content = JsonUtility.ToJson(packet.m_Joint);
+                    message.content = packet.m_Joint.SerializeBinary();
                     break;
                 
                 case actionType.PISTON_SLIDER_TRANSLATE:
                     message.action = actionType.PISTON_SLIDER_TRANSLATE;
                     Piston piston = Pistons.FindByGuid(packet.m_Piston.m_Guid);
                     packet.m_Piston.m_NormalizedValue = piston.m_Slider.GetNormalizedValue();
-                    message.content = JsonUtility.ToJson(packet.m_Piston);
+                    message.content = packet.m_Piston.SerializeBinary();
                     break;
                 
                 case actionType.SPRING_SLIDER_TRANSLATE:
                     message.action = actionType.SPRING_SLIDER_TRANSLATE;
                     BridgeSpring spring = BridgeSprings.FindByGuid(packet.m_Spring.m_Guid);
                     packet.m_Spring.m_NormalizedValue = spring.m_Slider.GetNormalizedValue();
-                    message.content = JsonUtility.ToJson(packet.m_Spring);
+                    message.content = packet.m_Spring.SerializeBinary();
                     break;
                 default:
                     instance.Logger.LogError($"Invalid undo action - {action}");
@@ -1629,7 +1636,7 @@ namespace MultiplayerMod
                 if (instance.communication.isOwner){
                     var message = new BridgeActionModel {
                         action = actionType.FREEZE,
-                        content = "true"
+                        content = BitConverter.GetBytes(true)
                     };
                     instance.Logger.LogInfo($"<CLIENT> sending {message.action} - PauseMenu");
                     instance.communication.Lobby.SendBridgeAction(message);
@@ -1664,6 +1671,20 @@ namespace MultiplayerMod
             }
         }
 
+        public static string GetJustStringFromBytes(byte[] bytes)
+        {
+            int offset = 0;
+        	ushort num = BitConverter.ToUInt16(bytes, offset);
+        	offset += 2;
+        	if (num > 0)
+        	{
+        		string @string = Encoding.UTF8.GetString(bytes, offset, (int)num);
+        		offset += (int)num;
+        		return @string;
+        	}
+        	return "";
+        }
+
 
         Harmony harmony;
     }
@@ -1694,13 +1715,16 @@ namespace MultiplayerMod
         //ADD_PHASE,
         //REMOVE_PHASE
     }
-    [System.Serializable]
     public class HydraulicsControllerActionModel {
-        public HydraulicsControllerAction action;
-        public string phaseGuid;
-        public string jointGuid;
-        public string pistonProxySerialized;
-        public SplitJointState splitJointState;
+        public HydraulicsControllerActionModel(){}
+        public HydraulicsControllerActionModel(byte[] bytes, ref int offset){
+            this.Deserialize(bytes, ref offset);
+        }
+        public HydraulicsControllerAction action = HydraulicsControllerAction.ADD_SPLIT_JOINT;
+        public string phaseGuid = "";
+        public string jointGuid = "";
+        public string pistonProxySerialized = "";
+        public SplitJointState splitJointState = SplitJointState.NONE_SPLIT;
         public bool ThreeWaySplitJointToggleState = false;
         public bool doForEveryPhase = false;
         public bool phaseMustBeAcceptingAdditions = false;
@@ -1708,12 +1732,58 @@ namespace MultiplayerMod
         public bool doForEveryPiston = false;
         public bool DisableAdditonsState = false;
         public bool weirdRemoveFlagForJointBeingDestroyed = false;
+
+        public byte[] Serialize(){
+            List<byte> list = new List<byte>();
+            list.AddRange(ByteSerializer.SerializeInt((int)this.action));
+            list.AddRange(ByteSerializer.SerializeString(this.phaseGuid));
+            list.AddRange(ByteSerializer.SerializeString(this.jointGuid));
+            list.AddRange(ByteSerializer.SerializeString(this.pistonProxySerialized));
+            list.AddRange(ByteSerializer.SerializeInt((int)this.splitJointState));
+            list.AddRange(ByteSerializer.SerializeBool(this.ThreeWaySplitJointToggleState));
+            list.AddRange(ByteSerializer.SerializeBool(this.doForEveryPhase));
+            list.AddRange(ByteSerializer.SerializeBool(this.phaseMustBeAcceptingAdditions));
+            list.AddRange(ByteSerializer.SerializeBool(this.doForEverySplitJoint));
+            list.AddRange(ByteSerializer.SerializeBool(this.doForEveryPiston));
+            list.AddRange(ByteSerializer.SerializeBool(this.DisableAdditonsState));
+            list.AddRange(ByteSerializer.SerializeBool(this.weirdRemoveFlagForJointBeingDestroyed));
+            return list.ToArray();
+        }
+        public void Deserialize(byte[] bytes, ref int offset){
+            this.action = (HydraulicsControllerAction)ByteSerializer.DeserializeInt(bytes, ref offset);
+            this.phaseGuid = ByteSerializer.DeserializeString(bytes, ref offset);
+            this.jointGuid = ByteSerializer.DeserializeString(bytes, ref offset);
+            this.pistonProxySerialized = ByteSerializer.DeserializeString(bytes, ref offset);
+            this.splitJointState = (SplitJointState)ByteSerializer.DeserializeInt(bytes, ref offset);
+            this.ThreeWaySplitJointToggleState = ByteSerializer.DeserializeBool(bytes, ref offset);
+            this.doForEveryPhase = ByteSerializer.DeserializeBool(bytes, ref offset);
+            this.phaseMustBeAcceptingAdditions = ByteSerializer.DeserializeBool(bytes, ref offset);
+            this.doForEverySplitJoint = ByteSerializer.DeserializeBool(bytes, ref offset);
+            this.doForEveryPiston = ByteSerializer.DeserializeBool(bytes, ref offset);
+            this.DisableAdditonsState = ByteSerializer.DeserializeBool(bytes, ref offset);
+            this.weirdRemoveFlagForJointBeingDestroyed = ByteSerializer.DeserializeBool(bytes, ref offset);
+        }
     }
 
     [System.Serializable]
     public class SyncLayoutModel {
+        public SyncLayoutModel(){}
+        public SyncLayoutModel(byte[] bytes, ref int offset){
+            this.Deserialize(bytes, ref offset);
+        }
         public byte[] layoutData;
         public bool targetAllUsers;
+
+        public byte[] Serialize(){
+            List<byte> list = new List<byte>();
+            list.AddRange(ByteSerializer.SerializeBool(this.targetAllUsers));
+            list.AddRange(ByteSerializer.SerializeByteArray(this.layoutData));
+            return list.ToArray();
+        }
+        public void Deserialize(byte[] bytes, ref int offset){
+            this.targetAllUsers = ByteSerializer.DeserializeBool(bytes, ref offset);
+            this.layoutData = ByteSerializer.DeserializeByteArray(bytes, ref offset);
+        }
     }
     
     

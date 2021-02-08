@@ -23,7 +23,7 @@ public class WsClient
     private Uri serverUri;
 
     // Queues
-    public ConcurrentQueue<String> receiveQueue { get; }
+    public ConcurrentQueue<byte[]> receiveQueue { get; }
     public BlockingCollection<ArraySegment<byte>> sendQueue { get; }
 
     // Threads
@@ -41,7 +41,7 @@ public class WsClient
 
         serverUri = new Uri(serverURL);
 
-        receiveQueue = new ConcurrentQueue<string>();
+        receiveQueue = new ConcurrentQueue<byte[]>();
         receiveThread = new Thread(RunReceive);
         receiveThread.Start();
 
@@ -103,9 +103,9 @@ public class WsClient
     /// Method used to send a message to the server.
     /// </summary>
     /// <param name="message">Message.</param>
-    public void Send(string message)
+    public void Send(byte[] message)
     {
-        byte[] buffer = encoder.GetBytes(message);
+        byte[] buffer = message;
         //Debug.Log("Message to queue for send: " + buffer.Length + ", message: " + message);
         var sendBuf = new ArraySegment<byte>(buffer);
 
@@ -125,7 +125,7 @@ public class WsClient
             {
                 msg = sendQueue.Take();
                 //Debug.Log("Dequeued this message to send: " + msg);
-                await ws.SendAsync(msg, WebSocketMessageType.Text, true /* is last part of message */, CancellationToken.None);
+                await ws.SendAsync(msg, WebSocketMessageType.Binary, true /* is last part of message */, CancellationToken.None);
             }
         }
     }
@@ -139,7 +139,7 @@ public class WsClient
     /// </summary>
     /// <returns>The message.</returns>
     /// <param name="maxSize">Max size.</param>
-    private async Task<string> Receive(UInt64 maxSize = MAXREADSIZE)
+    private async Task<byte[]> Receive(UInt64 maxSize = MAXREADSIZE)
     {
         // A read buffer, and a memory stream to stuff unknown number of chunks into:
         byte[] buf = new byte[4 * 1024];
@@ -162,14 +162,17 @@ public class WsClient
             ms.Seek(0, SeekOrigin.Begin);
 
             // Looking for UTF-8 JSON type messages.
-            if (chunkResult.MessageType == WebSocketMessageType.Text)
-            {
-                return CommunicationUtils.StreamToString(ms, Encoding.UTF8);
+            if (chunkResult.MessageType == WebSocketMessageType.Binary){
+                return ms.ToArray();
             }
+            else {
+                Debug.LogError("Recieved Message of type: " + chunkResult.MessageType.ToString());
+            }
+
 
         }
 
-        return "";
+        return new byte[] {};
     }
 
     /// <summary>
@@ -178,7 +181,7 @@ public class WsClient
     private async void RunReceive()
     {
         Debug.Log("WebSocket Message Receiver looping.");
-        string result;
+        byte[] result;
         while (true)
         {
             //Debug.Log("Awaiting Receive...");
