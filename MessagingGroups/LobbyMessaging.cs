@@ -24,6 +24,8 @@ public class LobbyMessaging : BaseMessaging
 
     // Bridge
     public const string BridgeAction = "BridgeAction";
+
+    public const string MousePosition = "MousePosition";
     
     // popups and messages
     public const string PopupMessage = "PopupMessage";

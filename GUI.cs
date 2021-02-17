@@ -24,12 +24,6 @@ namespace MultiplayerMod
         private int inputWidth = 250;
         public Vector2 scrollPosition;
 
-        public void Start(){
-            var windowBackground = new Texture2D(1, 1, TextureFormat.ARGB32, false);
-            windowBackground.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1));
-            windowBackground.Apply();
-            WindowBackground = windowBackground;
-        }
         private void OnGUI(){
             if (DisplayingWindow)
             {
@@ -134,11 +128,13 @@ namespace MultiplayerMod
                     }
                     else if (!clientEnabled){
                         if (GUILayout.Button("Connect")){
+                            InterfaceAudio.Play("ui_menu_select");
                             Connect();
                         }
                     }
                     else {
                         if (GUILayout.Button(communication.isOwner ? "Disconnect (Closes Session)" : "Disconnect")){
+                            InterfaceAudio.Play("ui_menu_select");
                             Disconnect();
                         }
                     }
@@ -160,63 +156,95 @@ namespace MultiplayerMod
                         Horizontal(() => {
                             GUIValues.changingPassword = GUILayout.PasswordField(GUIValues.changingPassword, '*', GUILayout.Width(inputWidth));
                             if (GUILayout.Button("Set password")){
+                                InterfaceAudio.Play("ui_menu_select");
                                 setPassword();
                             }
                         });
                         Horizontal(() => {
                             GUIValues.userCap = GUILayout.TextField(GUIValues.userCap, GUILayout.Width(inputWidth));
                             if (GUILayout.Button("Set user cap")){
+                                InterfaceAudio.Play("ui_menu_select");
                                 setUserCap();
                             }
                         });
-                        Horizontal(() => {
-                            GUIValues.lobbyMode = GUILayout.TextField(GUIValues.lobbyMode, GUILayout.Width(inputWidth));
-                            if (GUILayout.Button("Set lobby mode")){
-                                setLobbyMode();
-                            }
-                        });
-                        GUILayout.Label("Valid Lobby modes are: public, password_locked, invite_only");
+                        if (serverInfo != null){
+                            Horizontal(() => {
+                                GUILayout.Label("Lobby Mode:");
+                                var lobby_mode_selected = new GUIStyle(GUI.skin.button);
+                                lobby_mode_selected.normal.textColor = Color.green;
+                                lobby_mode_selected.hover.textColor = Color.green;
+                                var modes = Enum.GetValues(typeof(LobbyMode));
+                                foreach (LobbyMode mode in modes){
+                                    if (
+                                        GUILayout.Button(mode.ToString().ToLower(), 
+                                            serverInfo.lobbyMode == mode ? lobby_mode_selected : GUI.skin.button, 
+                                            GUILayout.Width(150f)
+                                        )
+                                    ){
+                                        InterfaceAudio.Play("ui_menu_select");
+                                        serverInfo.lobbyMode = mode;
+                                        setLobbyMode(mode);
+                                    }
+                                }
+                                
+                                
+                            });
+                        }
+                        
                         Horizontal(() => {
                             GUIValues.acceptingConnections = GUILayout.Toggle(GUIValues.acceptingConnections, "Accepting Connections");
                             if (GUIValues.acceptingConnections != GUIValues._acceptingConnectionsPrevFrame){
+                                InterfaceAudio.Play("ui_settings_toggle");
                                 setAcceptConnections();
                             }
                             GUIValues._acceptingConnectionsPrevFrame = GUIValues.acceptingConnections;
                         });
-                        
-                        // create invites
-                        Horizontal(() => {
-                            GUILayout.Label("number of allowed invite uses:");
-                            GUIValues.inviteUses = GUILayout.TextField(GUIValues.inviteUses, GUILayout.Width(inputWidth));
-                        });
-                        if (GUILayout.Button("Create invite")){
-                            CreateInvite();
+                        if (serverInfo != null && serverInfo.lobbyMode == LobbyMode.INVITE_ONLY){
+                            // create invites
+                            Horizontal(() => {
+                                GUILayout.Label("number of allowed invite uses:");
+                                GUIValues.inviteUses = GUILayout.TextField(GUIValues.inviteUses, GUILayout.Width(inputWidth));
+                            });
+                            if (GUILayout.Button("Create invite")){
+                                InterfaceAudio.Play("ui_menu_select");
+                                CreateInvite();
+                            }
+                            // revoke invite/clear invites (backend implementation needed)
+                            if (GUIValues.InviteResponse != "") {
+                                Horizontal(() => {
+                                    GUILayout.TextField(GUIValues.InviteResponse, GUILayout.ExpandWidth(true));
+                                    if(GUILayout.Button("Close")) GUIValues.InviteResponse = "";
+                                });
+
+                            }
                         }
-                        // revoke invite/clear invites (backend implementation needed)
-                        if (GUIValues.InviteResponse != "") GUILayout.TextField(GUIValues.InviteResponse);
+                        
 
                         // sync with all users
                         if (GUILayout.Button("Sync layout with all connected users")){
+                            InterfaceAudio.Play("ui_menu_select");
                             syncLayout();
                         }
-                        
-                        // Kick user
-                        Horizontal(() => {
-                            GUILayout.Label("Username to kick:");
-                            GUIValues.kickUser = GUILayout.TextField(GUIValues.kickUser, GUILayout.Width(inputWidth));
-                        });
-                        Horizontal(() => {
-                            GUILayout.Label("(optional) Kick reason:");
-                            GUIValues.kickUserReason = GUILayout.TextField(GUIValues.kickUserReason, GUILayout.Width(inputWidth));
-                        });
-                        Horizontal(() => {
-                            if (GUILayout.Button("Kick user")){
-                                KickUser();
+                        if (serverInfo != null && serverInfo.playerNames.Length > 0){
+                            // Kick user
+                            Horizontal(() => {
+                                GUILayout.Label("(optional) Kick reason:");
+                                GUIValues.kickUserReason = GUILayout.TextField(GUIValues.kickUserReason, GUILayout.Width(inputWidth));
+                            });
+                            foreach (string playerName in serverInfo.playerNames){
+                                Horizontal(() => {
+                                    GUILayout.Label(playerName, GUILayout.Width(inputWidth));
+                                    if (GUILayout.Button("Kick")){
+                                        InterfaceAudio.Play("ui_menu_select");
+                                        KickUser(playerName);
+                                    }
+                                });
                             }
-                        });
-                        if (GUIValues.kickResponse != ""){
-                            GUILayout.Label(GUIValues.kickResponse);
+                            if (GUIValues.kickResponse != ""){
+                                GUILayout.Label(GUIValues.kickResponse);
+                            }
                         }
+                        
                         
                         // set lobby mode
                     }, GUI.skin.box);
@@ -231,11 +259,12 @@ namespace MultiplayerMod
                         });
                         // sync layout
                         if (GUILayout.Button("Request layout sync from host")){
+                            InterfaceAudio.Play("ui_menu_select");
                             syncLayout();
                         }
                     }, GUI.skin.box);
                 }
-                if (clientEnabled){
+                if (clientEnabled && serverInfo != null){
                     Vertical(() =>
                     {
                         Horizontal(() => {
@@ -243,8 +272,12 @@ namespace MultiplayerMod
                             DrawHeader("Connection Details");
                             GUILayout.FlexibleSpace();
                         });
-                        GUILayout.Label(GUIValues.serverInfoString);
-                        if (GUILayout.Button("Refresh")) ConnectionInfo();
+                        GUILayout.Label($"Session Lobby Mode: {serverInfo.lobbyMode}");
+                        GUILayout.Label($"Connected Users: {serverInfo.userCount}/{serverInfo.userCap}");
+                        GUILayout.Label($"Accepting New Connections: {serverInfo.acceptingConnections}");
+                        GUILayout.Label($"Session frozen: {serverInfo.isFrozen}");
+
+                        //if (GUILayout.Button("Refresh")) ConnectionInfo();
                     }, GUI.skin.box);
                 }
 
@@ -298,11 +331,12 @@ namespace MultiplayerMod
             public static string inviteUses = "1";
             public static string lobbyMode = "";
             public static bool secureConnection = false;
-            public static void resetMessages(){
+            public static void Reset(){
                 GUIValues.ConnectionResponse = "";
                 GUIValues.InviteResponse = "";
                 GUIValues.kickResponse = "";
                 GUIValues.serverInfoString = "";
+                instance.serverInfo = null;
             }
         }
     }

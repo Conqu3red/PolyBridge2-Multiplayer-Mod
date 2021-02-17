@@ -29,6 +29,7 @@ class BridgeActionModel:
         this["content"] = stream.ReadByteArray()
         this["username"] = stream.ReadString()
         this["metadata"] = stream.ReadString()
+        this["playSound"] = stream.ReadBool()
         return this
     def Serialize(this):
         stream = BinaryStream()
@@ -36,6 +37,7 @@ class BridgeActionModel:
         stream.WriteByteArray(this["content"])
         stream.WriteString(this["username"])
         stream.WriteString(this["metadata"])
+        stream.WriteBool(this["playSound"])
         return stream.base_stream
 
 class ServerConfigModel:
@@ -70,6 +72,36 @@ class LayoutModel:
         return this
     def Serialize(this):
         raise NotImplementedError()
+
+class ServerInfoModel:
+    def Deserialize(_bytes: bytes):
+        raise NotImplementedError() # this is never actually needed as the server is the only one sending this data
+    def Serialize(this):
+        stream = BinaryStream()
+        stream.WriteInt32(this["usersConnected"])
+        stream.WriteInt32(this["userCap"])
+        stream.WriteBool(this["acceptingConnections"])
+        stream.WriteInt32(this["lobbyMode"])
+        stream.WriteBool(this["isFrozen"])
+        stream.WriteStrings(this["playerNames"])
+        return stream.base_stream
+
+class MousePositionModel:
+    def Deserialize(_bytes: bytes):
+        stream = BinaryStream(_bytes)
+        this = {}
+        this["username"] = stream.ReadString()
+        this["position"] = stream.ReadVector3()
+        this["pointerMode"] = stream.ReadInt32()
+        this["pointerColor"] = stream.ReadColor()
+        return this
+    def Serialize(this):
+        stream = BinaryStream()
+        stream.WriteString(this["username"])
+        stream.WriteVector3(this["position"])
+        stream.WriteInt32(this["pointerMode"])
+        stream.WriteColor(this["pointerColor"])
+        return stream.base_stream
 
 def stringResponse(string:str):
     stream = BinaryStream()

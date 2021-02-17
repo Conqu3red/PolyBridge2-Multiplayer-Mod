@@ -13,6 +13,7 @@ using System.Threading;
 using UnityEngine.UI;
 using System.IO;
 using System.Text;
+using System.Collections;
 
 namespace MultiplayerMod
 {
@@ -32,11 +33,13 @@ namespace MultiplayerMod
             modEnabledDef = new ConfigDefinition("Multiplayer Mod", "Enable/Disable Mod");
         public static ConfigEntry<bool>
             modEnabled,
-            logActions;
+            logActions,
+            showMice;
         public static ConfigEntry<float>
             backupFrequency,
             writeToLogFrequency;
         private static ConfigEntry<BepInEx.Configuration.KeyboardShortcut> _keybind;
+        public static ConfigEntry<Color> mouseColor;
         public static MultiplayerMod instance;
         public static string ClientName = "";
         public static string serverName = "";
@@ -48,6 +51,18 @@ namespace MultiplayerMod
         public List<string> logBuffer = new List<string> ();
         public string backupFolder = "MultiplayerBackups";
         public bool serverIsFrozen = false;
+        public ServerInfoModel serverInfo;
+        Coroutine GetServerInfo;
+        Coroutine SendMousePos;
+        public Dictionary<string, PointerHandler> mousePositions = new Dictionary<string, PointerHandler> {};
+        public GameObject canvas;
+        public GameObject _canvas;
+
+        public Dictionary<PointerMode, Sprite> pointerSprites = new Dictionary<PointerMode, Sprite> {};
+        public Sprite normalPointer;
+        public Sprite movePointer;
+        public Sprite toggleSelectPointer;
+        public Vector3 previousMousePos = new Vector3();
         void Awake()
         {
             this.repositoryUrl = "https://github.com/Conqu3red/PolyBridge2-Multiplayer-Mod/";
@@ -65,6 +80,10 @@ namespace MultiplayerMod
             
             _keybind = Config.Bind("Multiplayer Mod", "Keybind to open GUI", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F3));
             
+            mouseColor = Config.Bind("Multiplayer Mod", "Mouse Color", Color.red);
+
+            showMice = Config.Bind("Multiplayer Mod", "Show other users mice", true);
+
             BackupTimer.Elapsed += (sender, args) => { backupLayout(); };
             BackupTimer.AutoReset = true;
             BackupTimer.Interval = backupFrequency.Value*1000;
@@ -108,12 +127,63 @@ namespace MultiplayerMod
             set {}
         }
 
+        public void Start(){
+            var windowBackground = new Texture2D(1, 1, TextureFormat.ARGB32, false);
+            windowBackground.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1));
+            windowBackground.Apply();
+            WindowBackground = windowBackground;
+            _canvas = new GameObject("cursorCanvas");
+            DontDestroyOnLoad(_canvas);
+            canvas = Instantiate(_canvas, base.transform);
+            DontDestroyOnLoad(canvas);
+        }
+
+        [HarmonyPatch(typeof(GameUI), "StartManual")]
+        public static class GameUIStartPatch {
+            public static void Postfix(){
+                instance.normalPointer = Sprite.Create(
+                    GameUI.m_Instance.m_PointerNormalTexture, 
+                    new Rect(0, 0, GameUI.m_Instance.m_PointerNormalTexture.width, GameUI.m_Instance.m_PointerNormalTexture.height), 
+                    new Vector2(0f, 15/16f),
+                    96f
+                );
+                instance.movePointer = Sprite.Create(
+                    GameUI.m_Instance.m_PointerMoveTexture, 
+                    new Rect(0, 0, GameUI.m_Instance.m_PointerMoveTexture.width, GameUI.m_Instance.m_PointerMoveTexture.height), 
+                    new Vector2(0.5f, 0.5f),
+                    96f
+                );
+                instance.toggleSelectPointer = Sprite.Create(
+                    GameUI.m_Instance.m_PointerSelectToggleTexture, 
+                    new Rect(0, 0, GameUI.m_Instance.m_PointerSelectToggleTexture.width, GameUI.m_Instance.m_PointerSelectToggleTexture.height), 
+                    new Vector2(0f,15/16f),
+                    96f
+                );
+                
+                instance.pointerSprites[PointerMode.INVALID] = instance.normalPointer;
+                instance.pointerSprites[PointerMode.NORMAL] = instance.normalPointer;
+                instance.pointerSprites[PointerMode.MOVE] = instance.movePointer;
+                instance.pointerSprites[PointerMode.SELECT_TOGGLE] = instance.toggleSelectPointer;
+            }
+        }
         public void Update(){
             if (!DisplayingWindow && _keybind.Value.IsUp())
             {
                 DisplayingWindow = true;
             }
-            if (instance.communication != null) instance.communication.Update();
+            if (communication != null) {
+                communication.Update();
+                if (serverIsFrozen || Bridge.IsSimulating() || !showMice.Value){
+                    if (canvas.activeInHierarchy){
+                        canvas.SetActive(false);
+                    }
+                }
+                else if (!canvas.activeInHierarchy){
+                    canvas.SetActive(true);
+                }
+            }
+            //UpdateMouseDrawers();
+
         }
 
         /// <summary>
@@ -123,6 +193,16 @@ namespace MultiplayerMod
         {
             instance.communication.Lobby.OnConnectedToServer -= instance.OnConnectedToServer;
             instance.communication.Lobby.OnBridgeAction += instance.OnBridgeAction;
+            GetServerInfo = StartCoroutine(InvokeRepeat("ConnectionInfo", 0, 2.5f));
+            SendMousePos = StartCoroutine(InvokeRepeat("SendMousePosition", 0, 0.1f)); // this is a bit spammy but eh
+        }
+
+        IEnumerator InvokeRepeat(string function, float delay, float interval) {
+            yield return new WaitForSecondsRealtime(delay);
+            while (true) {
+                Invoke(function, 0f);
+                yield return new WaitForSecondsRealtime(interval);
+            }
         }
         public void OnBridgeAction(BridgeActionModel message)
         {
@@ -179,15 +259,18 @@ namespace MultiplayerMod
                         NodeB,
                         edgeProxy.m_Material
                     );
+                    if (message.playSound){
+                        //BridgeAudio.PlayCreateEdge(edgeProxy.m_Material);
+                    }
                     instance.ClientRecieving[actionType.CREATE_EDGE] = false;
-                    if (edge.IsPiston())
-		            {
-		            	Pistons.GetPistonOnEdge(edge).m_Slider.MakeVisible();
-		            }
-		            if (edge.IsSpring())
-		            {
-		            	edge.m_SpringCoilVisualization.m_Slider.MakeVisible();
-		            }
+                    //if (edge.IsPiston()) // I don't think this code should be running
+		            //{
+		            //	Pistons.GetPistonOnEdge(edge).m_Slider.MakeVisible();
+		            //}
+		            //if (edge.IsSpring())
+		            //{
+		            //	edge.m_SpringCoilVisualization.m_Slider.MakeVisible();
+		            //}
                     break;
                 
                 case actionType.CREATE_JOINT:
@@ -208,6 +291,9 @@ namespace MultiplayerMod
                     if (edge){
                         edge.ForceDisable();
                         edge.SetStressColor(0f);
+                        if (message.playSound){
+                            //InterfaceAudio.Play("ui_build_delete");
+                        }
                     }
                     BridgeJoints.DeleteOrphanedJoints();
                     break;
@@ -217,6 +303,7 @@ namespace MultiplayerMod
                     if (joint){
                         joint.gameObject.SetActive(false);
                     }
+                    BridgeJoints.DeleteOrphanedJoints();
                     break;
                 case actionType.TRANSLATE_JOINT:
                     jointProxy = new BridgeJointProxy(25, message.content, ref offset);
@@ -598,30 +685,108 @@ namespace MultiplayerMod
                 
             }
             instance.communication = null;
+            instance.serverInfo = null;
             instance.logBuffer.Clear();
-            GUIValues.resetMessages();
+            GUIValues.Reset();
+            instance.StopCoroutine(instance.GetServerInfo);
+            instance.StopCoroutine(instance.SendMousePos);
+            foreach (string key in instance.mousePositions.Keys){
+                Destroy(instance.mousePositions[key].Container);
+            }
+            instance.mousePositions.Clear();
             //uConsole.Log("Disabled Client");
             //instance.clientEnabled = false;
         }
-        public static void ConnectionInfo(){
-            if (!instance.clientEnabled) return;
-            //uConsole.Log($"Connected to {instance.communication.hostIP}:{instance.communication.port}");
-            //uConsole.Log($"Connected to server {serverName}");
-            instance.communication.SendRequest(
+        public void ConnectionInfo(){
+            if (!clientEnabled) return;
+            communication.SendRequest(
                 new MessageModel {
                     type = LobbyMessaging.ServerInfo
                 }.Serialize()
             );
         }
+        public void SendMousePosition(){
+            if (Bridge.IsSimulating()) return;
+            Vector3 pos = Cameras.MainCamera().ScreenToWorldPoint(Input.mousePosition);
+            if (Vector3.Distance(pos, previousMousePos) < 0.1) return;
+            communication.SendRequest(
+                new MessageModel {
+                    type = LobbyMessaging.MousePosition,
+                    content = new MousePositionModel {
+                        position = pos,
+                        pointerMode = GameUI.GetPointerMode(),
+                        pointerColor = mouseColor.Value
+                    }.Serialize()
+                }.Serialize()
+            );
+            previousMousePos = pos;
+        }
 
-        public static void KickUser(){
+        public void HandleMousePositionRecieved(MousePositionModel mousePosition){
+            PointerHandler handler;
+            SpriteRenderer renderer;
+            if (!mousePositions.TryGetValue(mousePosition.username, out handler)){
+                Debug.Log("new mouse: " + mousePosition.username);
+                handler = new PointerHandler();
+                handler.Container.transform.parent = canvas.transform;
+                mousePositions[mousePosition.username] = handler;
+            }
+            mousePosition.position.z = -2.5f;
+            renderer = handler.Container.GetComponent<SpriteRenderer>();
+            renderer.transform.position = mousePosition.position;
+            renderer.sprite = pointerSprites[mousePosition.pointerMode];
+            handler.color = mousePosition.pointerColor;
+            renderer.color = handler.color;
+        }
+
+        public static void RemoveDisconnectedUsersFromMousePositions(){
+            var foundUser = false;
+            List<string> UsersToRemove = new List<string> {};
+            foreach (var username in instance.mousePositions.Keys){
+                foundUser = false;
+                foreach (string userConnected in instance.serverInfo.playerNames){
+                    if (username == userConnected){
+                        // user mouse already accounted for
+                        foundUser = true;
+                        break;
+                    }
+                }
+                // user is no longer connected, set their mouse for removal
+                if (!foundUser) UsersToRemove.Add(username);
+            }
+
+            foreach (string username in UsersToRemove){
+                Destroy(instance.mousePositions[username].Container);
+                instance.mousePositions.Remove(username);
+                //instance.Logger.LogInfo($"Removed {username}");
+            }
+            foreach (string key in instance.mousePositions.Keys){
+                //instance.Logger.LogInfo($"{key} : {instance.mousePositions[key]}");
+            }
+        }
+
+        public void SetFreeze(bool value){
+            var message = new BridgeActionModel {
+                action = actionType.FREEZE,
+                content = BitConverter.GetBytes(true)
+            };
+            instance.Logger.LogInfo($"<CLIENT> sending {message.action}");
+            instance.communication.Lobby.SendBridgeAction(message);
+            PopUpMessage.DisplayOkOnly(
+                "Changes frozen until you sync your layout with all connected users.", 
+                null
+            );
+            instance.serverIsFrozen = true;
+        }
+
+        public static void KickUser(string username){
             if (!instance.clientEnabled){
                 //uConsole.Log("You aren't connected to anything.");
                 return;
             }
            
             var content = new KickUserModel {
-                username = GUIValues.kickUser,
+                username = username,
                 reason = GUIValues.kickUserReason
             };
             var message = new MessageModel {
@@ -686,18 +851,9 @@ namespace MultiplayerMod
             };
             instance.communication.SendRequest(message.Serialize());
         }
-        public static void setLobbyMode(){
+        public static void setLobbyMode(LobbyMode mode){
             if (!instance.clientEnabled){
                 //uConsole.Log("You aren't connected to anything.");
-                return;
-            }
-            string lobby_mode = GUIValues.lobbyMode;
-            LobbyMode mode;
-            if (LobbyMode.TryParse(lobby_mode, true, out mode)){
-                //uConsole.Log("Changing Mode...");
-            }
-            else {
-                //uConsole.Log("Invalid Mode! Valid modes are: public, password_locked, invite_only");
                 return;
             }
 
@@ -822,7 +978,8 @@ namespace MultiplayerMod
                 var edge = new BridgeEdgeProxy(__result);
                 var message = new BridgeActionModel {
                     action = actionType.CREATE_EDGE,
-                    content = edge.SerializeBinary()
+                    content = edge.SerializeBinary(),
+                    playSound = true
                 };
                 instance.Logger.LogInfo("<CLIENT> sending CREATE_EDGE");
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -903,13 +1060,15 @@ namespace MultiplayerMod
                     instance.Logger.LogInfo("<CLIENT> sending DELETE_JOINT");
                     instance.communication.Lobby.SendBridgeAction(message);
                 }
-
+                bool playSound = true;
                 foreach (BridgeEdge e in BridgeSelectionSet.m_Edges){
                     var joint = new BridgeEdgeProxy(e);
                     var message = new BridgeActionModel {
                         action = actionType.DELETE_EDGE,
-                        content = joint.SerializeBinary()
+                        content = joint.SerializeBinary(),
+                        playSound = playSound
                     };
+                    playSound = false;
                     instance.Logger.LogInfo("<CLIENT> sending DELETE_EDGE");
                     instance.communication.Lobby.SendBridgeAction(message);
                     
@@ -1630,21 +1789,17 @@ namespace MultiplayerMod
             {
                 yield return AccessTools.Method(typeof(Panel_PauseMenu), "ExitToMainMenu");
                 yield return AccessTools.Method(typeof(Panel_PauseMenu), "ExitToCampaignMenu");
+                yield return AccessTools.Method(typeof(Panel_PauseMenu), "ExitToWorkshop");
+                yield return AccessTools.Method(typeof(Panel_LevelFailed), "OnExit");
+                yield return AccessTools.Method(typeof(Panel_LevelComplete), "OnExit");
+                yield return AccessTools.Method(typeof(Panel_LevelComplete), "OnNextLevel");
+                yield return AccessTools.Method(typeof(Panel_TopBar), "OnEdit");
+
             }
             public static bool Prefix(){
                 if (!instance.clientEnabled || instance.serverIsFrozen) return true;
                 if (instance.communication.isOwner){
-                    var message = new BridgeActionModel {
-                        action = actionType.FREEZE,
-                        content = BitConverter.GetBytes(true)
-                    };
-                    instance.Logger.LogInfo($"<CLIENT> sending {message.action} - PauseMenu");
-                    instance.communication.Lobby.SendBridgeAction(message);
-                    PopUpMessage.DisplayOkOnly(
-                        "Changes frozen until you sync your layout with all connected users.", 
-                        null
-                    );
-                    instance.serverIsFrozen = true;
+                    instance.SetFreeze(true);
                     return true;
                 }
                 else {
@@ -1656,6 +1811,7 @@ namespace MultiplayerMod
                 }
             }
         }
+
         [HarmonyPatch(typeof(Panel_PauseMenu), "OnLoadGame")]
         public static class LoadButtonPatch {
             public static bool Prefix(){
@@ -1670,6 +1826,7 @@ namespace MultiplayerMod
                 return true;
             }
         }
+
 
         public static string GetJustStringFromBytes(byte[] bytes)
         {

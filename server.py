@@ -18,6 +18,8 @@ class MessageType:
 
     # Bridge
     BridgeAction = "BridgeAction"
+
+    MousePosition = "MousePosition"
     
     # popups and messages
     PopupMessage = "PopupMessage"
@@ -74,24 +76,22 @@ class MultiplayerServer(WebSocket):
             server_name = parse.urlsplit(self.request.path).path.replace("/", "")
             parameters = dict(parse.parse_qsl(parse.urlsplit(self.request.path).query))
             username = parameters.get("username")
-            server = open_lobbies[server_name]
+            server = open_lobbies.get(server_name)
             #print(bytes(self.data))
             if server:
                 if self not in list(server.clients.values()): return
                 message = Message.Deserialize(bytes(self.data))
                 #print(message)
                 if message["type"] == MessageType.ServerInfo:
-                    mode_str = ""
-                    if server.lobby_mode == LobbyMode.public: mode_str = "public" 
-                    if server.lobby_mode == LobbyMode.password_locked: mode_str = "password locked"
-                    if server.lobby_mode == LobbyMode.invite_only: mode_str = "invite only" 
-                    if server.lobby_mode == LobbyMode.accept_only: mode_str = "accept only" # note: this mode has not been implemented yet
-
-                    info = f"Players Connected ({len(list(server.clients.keys()))}/{server.user_cap}): {', '.join(list(server.clients.keys()))}"
-                    info += f"\nLobby Mode: {mode_str}"
-                    info += f"\nAccepting Connections: {server.accepting_connections}"
-                    info += f"\nChanges Frozen: {server.frozen}"
-                    self.send_message(Message.Serialize({"type":MessageType.ServerInfo, "content":stringResponse(info)}))
+                    response = {
+                        "usersConnected": len(list(server.clients.keys())),
+                        "userCap": server.user_cap,
+                        "acceptingConnections": server.accepting_connections,
+                        "lobbyMode": server.lobby_mode,
+                        "isFrozen": server.frozen,
+                        "playerNames": list(server.clients.keys())
+                    }
+                    self.send_message(Message.Serialize({"type":MessageType.ServerInfo, "content":ServerInfoModel.Serialize(response)}))
 
                 if message["type"] == MessageType.KickUser and server.isOwner(self):
                     #print(message)
@@ -161,15 +161,25 @@ class MultiplayerServer(WebSocket):
                     if action_content["action"] == 12:
                         server.frozen = bool.from_bytes(action_content["content"], "little")
                     #server.print(action_content)
+                    action_content["username"] = server.getName(self)
+                    message["content"] = BridgeActionModel.Serialize(action_content)
+                    new_message = Message.Serialize(message)
                     for name, client in server.clients.items():
-                        action_content["username"] = server.getName(self)
-                        message["content"] = BridgeActionModel.Serialize(action_content)
-                        new_message = Message.Serialize(message)
-                        
                         if client != self:
                             #print(f"sending to {name}")
                             client.send_message(new_message)
-                        
+                if message["type"] == MessageType.MousePosition:
+                    action_content = MousePositionModel.Deserialize(message["content"])
+                    action_content["username"] = server.getName(self)
+                    #server.print(action_content)
+                    message["content"] = MousePositionModel.Serialize(action_content)
+                    new_message = Message.Serialize(message)
+                    for name, client in server.clients.items():
+                        if client != self:
+                            #print(f"sending to {name}")
+                            client.send_message(new_message)
+            else: # user sending data to a non existant server
+                self.close()            
         except Exception as e:
             print(e)
             traceback.print_tb(e.__traceback__)

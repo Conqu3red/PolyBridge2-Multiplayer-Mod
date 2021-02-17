@@ -34,6 +34,11 @@ class BinaryStream:
 
     def ReadBool(self):
         return self.unpack('?')
+    
+    def ReadUInt8(self):
+        return self.unpack('B', 1)
+    def ReadInt8(self):
+        return self.unpack('b', 1)
 
     def ReadInt16(self):
         return self.unpack('h', 2)
@@ -61,13 +66,27 @@ class BinaryStream:
 
     def ReadDouble(self):
         return self.unpack('d', 8)
+    
+    def ReadVector3(self):
+        return [self.ReadFloat(), self.ReadFloat(), self.ReadFloat()]
 
+    def ReadColor(self):
+        return [self.ReadUInt8(), self.ReadUInt8(), self.ReadUInt8()]
     def ReadString(self):
         length = self.ReadUInt16()
         #print(length)
         if length > 0:
             return self.unpack(str(length) + 's', length).decode("utf-8")
         return ""
+    
+    def ReadStrings(self):
+        list_length = self.ReadUInt16()
+        #print(length)
+        ret = []
+        for i in range(list_length):
+            length = self.ReadUInt16()
+            ret.append(self.unpack(str(length) + 's', length).decode("utf-8"))
+        return ret
 
     def ReadStringSingleByteLength(self):
         length = int.from_bytes(self.ReadByte(), "little")
@@ -91,6 +110,9 @@ class BinaryStream:
         self.pack('?', value)
 
     def WriteUInt8(self, value):
+        self.pack('B', value)
+    
+    def WriteInt8(self, value):
         self.pack('b', value)
     
     def WriteInt16(self, value):
@@ -116,11 +138,23 @@ class BinaryStream:
 
     def WriteDouble(self, value):
         self.pack('d', value)
+    
+    def WriteVector3(self, value):
+        [self.WriteFloat(i) for i in value]
+    
+    def WriteColor(self, value):
+        [self.WriteUInt8(i) for i in value]
 
     def WriteString(self, value):
         length = len(value)
         self.WriteUInt16(length)
         self.pack(str(length) + 's', value.encode("utf-8"))
+    
+    def WriteStrings(self, value: list):
+        length = len(value)
+        self.WriteUInt16(length)
+        for string in value:
+            self.WriteString(string)
 
     def WriteStringSingleByteLength(self, value):
         length = len(value)

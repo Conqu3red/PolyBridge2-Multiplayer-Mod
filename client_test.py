@@ -3,6 +3,7 @@ import json
 from copy import *
 import uuid
 import time
+from StructureModels import *
 class ActionType:
     CREATE_EDGE = 0
     CREATE_JOINT = 1
@@ -19,9 +20,21 @@ message_template = {
 }
 MODE = "listen" + "no"
 
-ws = create_connection("ws://127.0.0.1:8181/test?username=test_user&password=aaa")
+ws = create_connection("ws://127.0.0.1:11000/a?username=test_user")
 print("ws", ws.recv())
-ws2 = create_connection("ws://127.0.0.1:8181/test?username=user2&password=aaa")
+while True:
+    ws.send(
+        MousePositionModel.Serialize(
+            {
+                "username":"a",
+                "position":[5,5,0],
+                "pointerMode":1,
+                "pointerColor":[255,0,0]
+            }
+        )
+    )
+    print("sent mouse pos")
+#ws2 = create_connection("ws://127.0.0.1:8181/test?username=user2&password=aaa")
 #print("ws", ws.recv())
 #print("ws2", ws2.recv())
 #ws.send(json.dumps({

@@ -14,6 +14,7 @@ public class BridgeActionModel
     public byte[] content;
     public string username = "";
     public string metadata = "";
+    public bool playSound = false;
 
     public byte[] Serialize(){
         List<byte> list = new List<byte>();
@@ -21,6 +22,7 @@ public class BridgeActionModel
         list.AddRange(ByteSerializer.SerializeByteArray(this.content));
         list.AddRange(ByteSerializer.SerializeString(this.username));
         list.AddRange(ByteSerializer.SerializeString(this.metadata));
+        list.AddRange(ByteSerializer.SerializeBool(this.playSound));
         return list.ToArray();
     }
     public void Deserialize(byte[] bytes, ref int offset){
@@ -28,5 +30,6 @@ public class BridgeActionModel
         this.content = ByteSerializer.DeserializeByteArray(bytes, ref offset);
         this.username = ByteSerializer.DeserializeString(bytes, ref offset);
         this.metadata = ByteSerializer.DeserializeString(bytes, ref offset);
+        this.playSound = ByteSerializer.DeserializeBool(bytes, ref offset);
     }
 }

@@ -2,6 +2,8 @@
 using System.IO;
 using System;
 using System.Text;
+using System.Collections.Generic;
+using UnityEngine.UI;
 /// <summary>
 /// Forefront class for the server communication.
 /// </summary>
@@ -91,6 +93,7 @@ public class ServerCommunication
             MultiplayerMod.MultiplayerMod.syncLayout();
         }
         offset = 0;
+        //Debug.Log(message.type);
         switch (message.type)
         {
             case LobbyMessaging.BridgeAction:
@@ -100,7 +103,8 @@ public class ServerCommunication
                 MultiplayerMod.MultiplayerMod.GUIValues.ConnectionResponse = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
                 break;
             case LobbyMessaging.ServerInfo:
-                MultiplayerMod.MultiplayerMod.GUIValues.serverInfoString = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
+                MultiplayerMod.MultiplayerMod.instance.serverInfo = new ServerInfoModel(message.content, ref offset);
+                MultiplayerMod.MultiplayerMod.RemoveDisconnectedUsersFromMousePositions();
                 break;
             case LobbyMessaging.KickUser:
                 MultiplayerMod.MultiplayerMod.GUIValues.kickResponse = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
@@ -111,7 +115,11 @@ public class ServerCommunication
             case LobbyMessaging.CreateInvite:
                 MultiplayerMod.MultiplayerMod.GUIValues.InviteResponse = MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content);
                 break;
-
+            case LobbyMessaging.MousePosition:
+                MousePositionModel mousePosition = new MousePositionModel(message.content, ref offset);
+                mousePosition.position.z = -1.1f;
+                MultiplayerMod.MultiplayerMod.instance.HandleMousePositionRecieved(mousePosition);
+                break;
             case LobbyMessaging.PopupMessage:
                 PopUpMessage.DisplayOkOnly(MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content), null);
                 if (isOwner) MultiplayerMod.MultiplayerMod.ActionLog($"Popup Message - {message.content}");
@@ -155,4 +163,16 @@ public class ServerCommunication
     {
         client.Send(message);
     }
+}
+
+public class PointerHandler {
+    public PointerHandler(){
+        this.Container = MultiplayerMod.MultiplayerMod.Instantiate(new GameObject("cursorContainer"));
+        this.color = Color.red;
+        SpriteRenderer renderer = this.Container.AddComponent<SpriteRenderer>();
+        
+
+    }
+    public GameObject Container;
+    public Color color;
 }
