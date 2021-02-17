@@ -62,7 +62,6 @@ namespace MultiplayerMod
         public Sprite normalPointer;
         public Sprite movePointer;
         public Sprite toggleSelectPointer;
-        public Vector3 previousMousePos = new Vector3();
         void Awake()
         {
             this.repositoryUrl = "https://github.com/Conqu3red/PolyBridge2-Multiplayer-Mod/";
@@ -708,7 +707,6 @@ namespace MultiplayerMod
         public void SendMousePosition(){
             if (Bridge.IsSimulating()) return;
             Vector3 pos = Cameras.MainCamera().ScreenToWorldPoint(Input.mousePosition);
-            if (Vector3.Distance(pos, previousMousePos) < 0.1) return;
             communication.SendRequest(
                 new MessageModel {
                     type = LobbyMessaging.MousePosition,
@@ -719,7 +717,6 @@ namespace MultiplayerMod
                     }.Serialize()
                 }.Serialize()
             );
-            previousMousePos = pos;
         }
 
         public void HandleMousePositionRecieved(MousePositionModel mousePosition){
