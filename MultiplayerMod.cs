@@ -27,7 +27,7 @@ namespace MultiplayerMod
         public new const string
             PluginGuid = "org.bepinex.plugins.MultiplayerMod",
             PluginName = "Multiplayer Mod",
-            PluginVersion = "1.0.0";
+            PluginVersion = "1.0.1";
         
         public static ConfigDefinition
             modEnabledDef = new ConfigDefinition("Multiplayer Mod", "Enable/Disable Mod");
