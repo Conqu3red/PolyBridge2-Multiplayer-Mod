@@ -62,6 +62,7 @@ namespace MultiplayerMod
         public Sprite normalPointer;
         public Sprite movePointer;
         public Sprite toggleSelectPointer;
+        public List<SyncRequest> syncRequests = new List<SyncRequest> {};
         void Awake()
         {
             this.repositoryUrl = "https://github.com/Conqu3red/PolyBridge2-Multiplayer-Mod/";
@@ -180,6 +181,10 @@ namespace MultiplayerMod
                 else if (!canvas.activeInHierarchy){
                     canvas.SetActive(true);
                 }
+            }
+            if (syncRequests.Count > 0 && GameStateManager.GetState() != GameState.SIM){
+                processSyncRequest(syncRequests[0]);
+                syncRequests.RemoveAt(0);
             }
             //UpdateMouseDrawers();
 
@@ -502,32 +507,7 @@ namespace MultiplayerMod
                     }
                     break;
                 case actionType.SYNC_LAYOUT:
-                    SyncLayoutModel layout = new SyncLayoutModel();
-                    BridgeActionModel _message = new BridgeActionModel { action = actionType.SYNC_LAYOUT };
-
-                    if (instance.communication.isOwner){
-                        instance.Logger.LogInfo("sending layout as requested");
-                        layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
-                        _message.content = layout.Serialize();
-                        instance.communication.Lobby.SendBridgeAction(_message);
-                        break;
-                    }
-                    layout = new SyncLayoutModel(message.content, ref offset);
-                    preventSendActions = true;
-                    int num = 0;
-			        var result = new SandboxLayoutData(layout.layoutData, ref num);
-                    Sandbox.Clear();
-                    Sandbox.Load(result.m_ThemeStubKey, result, true);
-                    SandboxUndo.Clear();
-		            SandboxUndo.SnapShot();
-		            PointsOfView.OnLayoutLoaded();
-		            if (GameStateManager.GetState() == GameState.BUILD)
-		            {
-		            	GameStateBuild.SetWaterProperties();
-		            	GameStateBuild.SetOverrideColorsForBuildMode();
-		            }
-                    preventSendActions = false;
-                    PopUpMessage.DisplayOkOnly("The host has synced their layout with you", null);
+                    syncRequests.Add(new SyncRequest { requestActive = true, message = message});
                     break;
 
                 case actionType.FREEZE:
@@ -542,6 +522,36 @@ namespace MultiplayerMod
                     break;
             }
             
+        }
+
+        public void processSyncRequest(SyncRequest request){
+            BridgeActionModel message = request.message;
+            int offset = 0;
+            SyncLayoutModel layout = new SyncLayoutModel();
+            BridgeActionModel _message = new BridgeActionModel { action = actionType.SYNC_LAYOUT };
+            if (instance.communication.isOwner){
+                instance.Logger.LogInfo("sending layout as requested");
+                layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
+                _message.content = layout.Serialize();
+                instance.communication.Lobby.SendBridgeAction(_message);
+                return;
+            }
+            layout = new SyncLayoutModel(message.content, ref offset);
+            preventSendActions = true;
+            int num = 0;
+			var result = new SandboxLayoutData(layout.layoutData, ref num);
+            Sandbox.Clear();
+            Sandbox.Load(result.m_ThemeStubKey, result, true);
+            SandboxUndo.Clear();
+		    SandboxUndo.SnapShot();
+		    PointsOfView.OnLayoutLoaded();
+		    if (GameStateManager.GetState() == GameState.BUILD)
+		    {
+		    	GameStateBuild.SetWaterProperties();
+		    	GameStateBuild.SetOverrideColorsForBuildMode();
+		    }
+            preventSendActions = false;
+            PopUpMessage.DisplayOkOnly("The host has synced their layout with you", null);
         }
 
         public static Dictionary<string, string> getOptionalParams(List<string> parameters){
@@ -595,6 +605,7 @@ namespace MultiplayerMod
         public void backupLayout(){
             if (!clientEnabled) return;
             if (!communication.isOwner) return;
+            if (GameStateManager.GetState() == GameState.SIM) return;
             try {
                 string filename = string.Format("{0:yyyy-MM-dd HH-mm-ss}.layout", DateTime.Now);
                 Logger.LogInfo("Performing Layout Backup...");
@@ -687,8 +698,8 @@ namespace MultiplayerMod
             instance.serverInfo = null;
             instance.logBuffer.Clear();
             GUIValues.Reset();
-            instance.StopCoroutine(instance.GetServerInfo);
-            instance.StopCoroutine(instance.SendMousePos);
+            if (instance.GetServerInfo != null) instance.StopCoroutine(instance.GetServerInfo);
+            if (instance.SendMousePos != null) instance.StopCoroutine(instance.SendMousePos);
             foreach (string key in instance.mousePositions.Keys){
                 Destroy(instance.mousePositions[key].Container);
             }
@@ -884,6 +895,10 @@ namespace MultiplayerMod
         public static void syncLayout(){
             if (!instance.clientEnabled){
                 //uConsole.Log("You aren't connected to anything.");
+                return;
+            }
+            if (GameStateManager.GetState() == GameState.SIM){
+                PopUpMessage.DisplayOkOnly("You must exit the simulation before syncing layout.", null);
                 return;
             }
             SyncLayoutModel layout = new SyncLayoutModel();
@@ -1940,5 +1955,9 @@ namespace MultiplayerMod
         }
     }
     
+    public class SyncRequest {
+        public bool requestActive = false;
+        public BridgeActionModel message = null;
+    }
     
 }

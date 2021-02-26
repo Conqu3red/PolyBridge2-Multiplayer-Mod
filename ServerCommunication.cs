@@ -45,7 +45,7 @@ public class ServerCommunication
         isOwner = false;
         string time = string.Format("{0:yyyy-MM-dd HH-mm-ss}", DateTime.Now);
         logFileName = $"session_{time}.log";
-        server = ssl ? "wss" : "ws" + "://" + host + ":" + port + "/" + path;
+        server = (ssl ? "wss" : "ws") + "://" + host + ":" + port + "/" + path;
         client = new WsClient(server);
 
         // Messaging
