@@ -27,7 +27,7 @@ namespace MultiplayerMod
         public new const string
             PluginGuid = "org.bepinex.plugins.MultiplayerMod",
             PluginName = "Multiplayer Mod",
-            PluginVersion = "1.0.1";
+            PluginVersion = "1.0.2";
         
         public static ConfigDefinition
             modEnabledDef = new ConfigDefinition("Multiplayer Mod", "Enable/Disable Mod");
@@ -38,7 +38,10 @@ namespace MultiplayerMod
         public static ConfigEntry<float>
             backupFrequency,
             writeToLogFrequency;
-        private static ConfigEntry<BepInEx.Configuration.KeyboardShortcut> _keybind;
+        private static ConfigEntry<BepInEx.Configuration.KeyboardShortcut> 
+            _keybind,
+            _toggleChatKeybind,
+            syncLayoutKeybind;
         public static ConfigEntry<Color> mouseColor;
         public static MultiplayerMod instance;
         public static string ClientName = "";
@@ -79,7 +82,9 @@ namespace MultiplayerMod
             writeToLogFrequency = Config.Bind("Multiplayer Mod", "Save to action log every amount of lines", 100f);
             
             _keybind = Config.Bind("Multiplayer Mod", "Keybind to open GUI", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F3));
-            
+            _toggleChatKeybind = Config.Bind("Multiplayer Mod", "Toggle Chat Visibility", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F4));
+            syncLayoutKeybind = Config.Bind("Multiplayer Mod", "Sync Layout", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F5));
+
             mouseColor = Config.Bind("Multiplayer Mod", "Mouse Color", Color.red);
 
             showMice = Config.Bind("Multiplayer Mod", "Show other users mice", true);
@@ -132,6 +137,12 @@ namespace MultiplayerMod
             windowBackground.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1));
             windowBackground.Apply();
             WindowBackground = windowBackground;
+            
+            var chatBackground = new Texture2D(1, 1, TextureFormat.ARGB32, false);
+            chatBackground.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 0.2f));
+            chatBackground.Apply();
+            ChatBackground = chatBackground;
+            
             _canvas = new GameObject("cursorCanvas");
             DontDestroyOnLoad(_canvas);
             canvas = Instantiate(_canvas, base.transform);
@@ -171,6 +182,10 @@ namespace MultiplayerMod
             {
                 DisplayingWindow = true;
             }
+            if (_toggleChatKeybind.Value.IsUp())
+            {
+                DisplayingChat = !DisplayingChat;
+            }
             if (communication != null) {
                 communication.Update();
                 if (serverIsFrozen || Bridge.IsSimulating() || !showMice.Value){
@@ -182,6 +197,7 @@ namespace MultiplayerMod
                     canvas.SetActive(true);
                 }
             }
+            if (syncLayoutKeybind.Value.IsUp()) syncLayout();
             if (syncRequests.Count > 0 && GameStateManager.GetState() != GameState.SIM){
                 processSyncRequest(syncRequests[0]);
                 syncRequests.RemoveAt(0);
@@ -675,6 +691,7 @@ namespace MultiplayerMod
             instance.communication.Init();
             instance.communication.Lobby.OnConnectedToServer += instance.OnConnectedToServer;
             instance.communication.ConnectToServer();
+            ChatValues.Reset();
             //uConsole.Log("Enabled Client");
         }
         public static void Disconnect(){

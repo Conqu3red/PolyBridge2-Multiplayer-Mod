@@ -25,6 +25,7 @@ class MessageType:
     PopupMessage = "PopupMessage"
     ConsoleMessage = "ConsoleMessage"
     TopLeftMessage = "TopLeftMessage"
+    ChatMessage = "ChatMessage"
     
     # owner/config management
     ServerConfig = "ServerConfig"
@@ -178,6 +179,13 @@ class MultiplayerServer(WebSocket):
                         if client != self:
                             #print(f"sending to {name}")
                             client.send_message(new_message)
+                if message["type"] == MessageType.ChatMessage:
+                    chat_message = ChatMessageModel.Deserialize(message["content"])
+                    chat_message["username"] = server.getName(self)
+                    message["content"] = ChatMessageModel.Serialize(chat_message)
+                    new_message = Message.Serialize(message)
+                    for name, client in server.clients.items():
+                        client.send_message(new_message)
             else: # user sending data to a non existant server
                 self.close()            
         except Exception as e:

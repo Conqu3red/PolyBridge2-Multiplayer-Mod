@@ -128,6 +128,12 @@ public class ServerCommunication
                 GameUI.ShowMessage(ScreenMessageLocation.TOP_LEFT, MultiplayerMod.MultiplayerMod.GetJustStringFromBytes(message.content), 3f);
                 if (isOwner) MultiplayerMod.MultiplayerMod.ActionLog($"Info Message - {message.content}");
                 break;
+            case LobbyMessaging.ChatMessage:
+                ChatMessageModel chatMessage = new ChatMessageModel(message.content, ref offset);
+                string color = "#" + ColorUtility.ToHtmlStringRGB(chatMessage.nameColor);
+                chatMessage.message = chatMessage.message.Replace("<", "<<i></i>");
+                MultiplayerMod.MultiplayerMod.ChatValues.chatLog += $"<color={color}>{chatMessage.username}</color>: {chatMessage.message}\n";
+                break;
             default:
                 Debug.LogError("Unknown type of method: " + message.type);
                 break;

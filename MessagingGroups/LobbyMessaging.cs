@@ -31,6 +31,7 @@ public class LobbyMessaging : BaseMessaging
     public const string PopupMessage = "PopupMessage";
     public const string ConsoleMessage = "ConsoleMessage";
     public const string TopLeftMessage = "TopLeftMessage";
+    public const string ChatMessage = "ChatMessage";
 
     // owner/config management
     public const string ServerConfig = "ServerConfig";

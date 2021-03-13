@@ -107,3 +107,18 @@ def stringResponse(string:str):
     stream = BinaryStream()
     stream.WriteString(string)
     return stream.base_stream
+
+class ChatMessageModel:
+    def Deserialize(_bytes: bytes):
+        stream = BinaryStream(_bytes)
+        this = {}
+        this["message"] = stream.ReadString()
+        this["username"] = stream.ReadString()
+        this["nameColor"] = stream.ReadColor()
+        return this
+    def Serialize(this):
+        stream = BinaryStream()
+        stream.WriteString(this["message"])
+        stream.WriteString(this["username"])
+        stream.WriteColor(this["nameColor"])
+        return stream.base_stream

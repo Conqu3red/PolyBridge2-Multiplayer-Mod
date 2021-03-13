@@ -24,6 +24,14 @@ namespace MultiplayerMod
         private int inputWidth = 250;
         public Vector2 scrollPosition;
 
+        // chat box variables
+        private bool _displayingChat = false;
+        internal Rect ChatRect { get; private set; }
+        private Texture2D ChatBackground;
+        private Vector2 chatScrollPosition;
+
+
+
         private void OnGUI(){
             if (DisplayingWindow)
             {
@@ -41,6 +49,12 @@ namespace MultiplayerMod
                 WindowRect = GUILayout.Window(-69, WindowRect, MultiplayerWindow, "Multiplayer Mod");
                 EatInputInRect(WindowRect);
             }
+            if (DisplayingChat)
+            {
+                GUI.Box(ChatRect, GUIContent.none, new GUIStyle { normal = new GUIStyleState { background = ChatBackground } });
+                ChatRect = GUILayout.Window(-70, ChatRect, ChatWindow, "Chat");
+                EatInputInRect(ChatRect);
+            }
         }
         private void CalculateWindowRect()
         {
@@ -54,6 +68,16 @@ namespace MultiplayerMod
 
             LeftColumnWidth = Mathf.RoundToInt(WindowRect.width / 2.5f);
             RightColumnWidth = (int)WindowRect.width - LeftColumnWidth - 115;
+        }
+
+        private void CalculateChatRect(){
+            _screenRect = new Rect(0, 0, Screen.width, Screen.height);
+            
+            var width = Mathf.Min(Screen.width, 200);
+            var height = 300;
+            var offsetX = 0;
+            var offsetY = Mathf.RoundToInt((Screen.height - height) / 2f);
+            ChatRect = new Rect(offsetX, offsetY, width, height);
         }
 
         public static void Horizontal(System.Action block, GUIStyle style = null){
@@ -288,6 +312,44 @@ namespace MultiplayerMod
                 instance.Logger.LogError(ex.Message);
             }
         }
+
+        private void ChatWindow(int id){
+            try {
+                // should reset scroll position to bottom when a message is received
+
+                GUIStyle myCustomStyle = new GUIStyle(GUI.skin.GetStyle("label"))
+                {
+                    wordWrap = true
+                };
+                chatScrollPosition = GUILayout.BeginScrollView(chatScrollPosition, GUILayout.MaxHeight(ChatRect.height - 10));
+                GUILayout.Label(ChatValues.chatLog, myCustomStyle, GUILayout.Width(175));
+                GUILayout.EndScrollView();
+                GUI.SetNextControlName("sendMessageField");
+                ChatValues.chatMessage = GUILayout.TextField(ChatValues.chatMessage, GUILayout.Width(175));
+                //Logger.LogInfo(GUI.GetNameOfFocusedControl());
+                Event e = Event.current;
+                if (e.keyCode == KeyCode.Return && GUI.GetNameOfFocusedControl() == "sendMessageField" && ChatValues.chatMessage != "" && clientEnabled){
+                    string message = ChatValues.chatMessage;
+                    ChatValues.chatMessage = "";
+                    Logger.LogInfo("send");
+                    ChatMessageModel chatMessage = new ChatMessageModel {
+                        message = message,
+                        username = "",
+                        nameColor = mouseColor.Value
+                    };
+                    communication.SendRequest(
+                        new MessageModel {
+                            type = LobbyMessaging.ChatMessage,
+                            content = chatMessage.Serialize()
+                        }.Serialize()
+                    );
+                }
+                //GUI.DragWindow(ChatRect);
+            }
+            catch (ArgumentException ex){
+                instance.Logger.LogError(ex.Message);
+            }
+        }
         
         public static void EatInputInRect(Rect eatRect)
         {
@@ -306,6 +368,21 @@ namespace MultiplayerMod
                 if (_displayingWindow)
                 {
                     CalculateWindowRect();
+                }
+            }
+        }
+
+        public bool DisplayingChat
+        {
+            get => _displayingChat;
+            set
+            {
+                if (_displayingChat == value) return;
+                _displayingChat = value;
+
+                if (_displayingChat)
+                {
+                    CalculateChatRect();
                 }
             }
         }
@@ -337,6 +414,16 @@ namespace MultiplayerMod
                 GUIValues.kickResponse = "";
                 GUIValues.serverInfoString = "";
                 instance.serverInfo = null;
+            }
+        }
+
+        public static class ChatValues {
+            public static string chatMessage = "";
+            public static string chatLog = "-- start of chat --\n";
+
+            public static void Reset(){
+                chatMessage = "";
+                chatLog = "-- start of chat --\n";
             }
         }
     }
