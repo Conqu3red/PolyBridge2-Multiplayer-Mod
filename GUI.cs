@@ -344,7 +344,7 @@ namespace MultiplayerMod
                         }.Serialize()
                     );
                 }
-                //GUI.DragWindow(ChatRect);
+                GUI.DragWindow();
             }
             catch (ArgumentException ex){
                 instance.Logger.LogError(ex.Message);

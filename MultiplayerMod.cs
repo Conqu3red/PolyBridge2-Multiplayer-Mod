@@ -1856,6 +1856,18 @@ namespace MultiplayerMod
             }
         }
 
+        [HarmonyPatch()]
+        public static class LoadLayoutOrSlotPatch {
+            static IEnumerable<MethodBase> TargetMethods()
+            {
+                yield return AccessTools.Method(typeof(BridgeSave), "Deserialize");
+                yield return AccessTools.Method(typeof(SandboxLayout), "DeserializeFromProxies");
+            }
+            public static void Postfix(){
+                // if (GameStateManager.GetState() == GameState.BUILD || GameStateManager.GetState() == GameState.SANDBOX) syncLayout();
+            }
+        }
+
 
         public static string GetJustStringFromBytes(byte[] bytes)
         {
