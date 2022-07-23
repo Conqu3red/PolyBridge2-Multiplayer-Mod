@@ -245,7 +245,7 @@ namespace MultiplayerMod
             // switch to handle actions
             switch (message.action){
                 case actionType.CREATE_EDGE:
-                    edgeProxy = new BridgeEdgeProxy(message.content, ref offset);
+                    edgeProxy = new BridgeEdgeProxy(10, message.content, ref offset);
                     //BridgeEdges.CreateEdgeFromProxy(edgeProxy);
 
                     edge = BridgeEdges.FindDisabledEdgeByJointGuids(
@@ -306,7 +306,7 @@ namespace MultiplayerMod
                     instance.ClientRecieving[actionType.CREATE_JOINT] = false;
                     break;
                 case actionType.DELETE_EDGE:
-                    edgeProxy = new BridgeEdgeProxy(message.content, ref offset);
+                    edgeProxy = new BridgeEdgeProxy(10, message.content, ref offset);
                     edge = BridgeEdges.FindEnabledEdgeByJointGuids(edgeProxy.m_NodeA_Guid, edgeProxy.m_NodeB_Guid, edgeProxy.m_Material);
                     if (edge){
                         edge.ForceDisable();
@@ -380,7 +380,7 @@ namespace MultiplayerMod
                     }
                     break;
                 case actionType.SPLIT_MODIFY:
-                    edgeProxy = new BridgeEdgeProxy(message.content, ref offset);
+                    edgeProxy = new BridgeEdgeProxy(10, message.content, ref offset);
                     edge = BridgeEdges.FindEnabledEdgeByJointGuids(edgeProxy.m_NodeA_Guid, edgeProxy.m_NodeB_Guid, edgeProxy.m_Material);
                     if (edge){
                         edge.m_JointAPart = edgeProxy.m_JointAPart;
@@ -1007,7 +1007,7 @@ namespace MultiplayerMod
                 var edge = new BridgeEdgeProxy(__result);
                 var message = new BridgeActionModel {
                     action = actionType.CREATE_EDGE,
-                    content = edge.SerializeBinary(),
+                    content = edge.SerializeBinary(true),
                     playSound = true
                 };
                 instance.Logger.LogInfo("<CLIENT> sending CREATE_EDGE");
@@ -1094,7 +1094,7 @@ namespace MultiplayerMod
                     var joint = new BridgeEdgeProxy(e);
                     var message = new BridgeActionModel {
                         action = actionType.DELETE_EDGE,
-                        content = joint.SerializeBinary(),
+                        content = joint.SerializeBinary(true),
                         playSound = playSound
                     };
                     playSound = false;
@@ -1203,7 +1203,7 @@ namespace MultiplayerMod
                 var edge = new BridgeEdgeProxy(__instance.m_Edge);
                 var message = new BridgeActionModel {
                     action = actionType.SPLIT_MODIFY,
-                    content = edge.SerializeBinary()
+                    content = edge.SerializeBinary(true)
                 };
                 
                 instance.communication.Lobby.SendBridgeAction(message);
@@ -1755,7 +1755,7 @@ namespace MultiplayerMod
             switch (action){
                 case actionType.CREATE_EDGE:
                     message.action = actionType.DELETE_EDGE;
-                    message.content = packet.m_Edge.SerializeBinary();
+                    message.content = packet.m_Edge.SerializeBinary(true);
                     break;
                 
                 case actionType.CREATE_JOINT:
@@ -1765,7 +1765,7 @@ namespace MultiplayerMod
                 
                 case actionType.DELETE_EDGE:
                     message.action = actionType.CREATE_EDGE;
-                    message.content = packet.m_Edge.SerializeBinary();
+                    message.content = packet.m_Edge.SerializeBinary(true);
                     break;
                 
                 case actionType.DELETE_JOINT:
@@ -1856,7 +1856,7 @@ namespace MultiplayerMod
             }
         }
 
-        [HarmonyPatch()]
+        [HarmonyPatch]
         public static class LoadLayoutOrSlotPatch {
             static IEnumerable<MethodBase> TargetMethods()
             {
@@ -1864,7 +1864,7 @@ namespace MultiplayerMod
                 yield return AccessTools.Method(typeof(SandboxLayout), "DeserializeFromProxies");
             }
             public static void Postfix(){
-                // if (GameStateManager.GetState() == GameState.BUILD || GameStateManager.GetState() == GameState.SANDBOX) syncLayout();
+                if (GameStateManager.GetState() == GameState.BUILD || GameStateManager.GetState() == GameState.SANDBOX) syncLayout();
             }
         }
 
