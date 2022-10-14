@@ -27,7 +27,7 @@ namespace MultiplayerMod
         public new const string
             PluginGuid = "org.bepinex.plugins.MultiplayerMod",
             PluginName = "Multiplayer Mod",
-            PluginVersion = "1.1.0";
+            PluginVersion = "1.1.1";
         
         public static ConfigDefinition
             modEnabledDef = new ConfigDefinition("Multiplayer Mod", "Enable/Disable Mod");
@@ -175,6 +175,7 @@ namespace MultiplayerMod
                 instance.pointerSprites[PointerMode.NORMAL] = instance.normalPointer;
                 instance.pointerSprites[PointerMode.MOVE] = instance.movePointer;
                 instance.pointerSprites[PointerMode.SELECT_TOGGLE] = instance.toggleSelectPointer;
+                instance.pointerSprites[PointerMode.ERASE] = instance.normalPointer;
             }
         }
         public void Update(){
@@ -357,7 +358,6 @@ namespace MultiplayerMod
                     ));
                     if (piston){
                         piston.m_Slider.SetNormalizedValue(pistonProxy.m_NormalizedValue);
-                        piston.m_Slider.MakeVisible();
                     }
                     break;
                 case actionType.SPLIT_JOINT:
@@ -547,7 +547,7 @@ namespace MultiplayerMod
             BridgeActionModel _message = new BridgeActionModel { action = actionType.SYNC_LAYOUT };
             if (instance.communication.isOwner){
                 instance.Logger.LogInfo("sending layout as requested");
-                layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
+                layout.layoutData = SandboxLayout.SerializeToProxies(SandboxLayout.CURRENT_VERSION).SerializeBinary();
                 _message.content = layout.Serialize();
                 instance.communication.Lobby.SendBridgeAction(_message);
                 return;
@@ -625,7 +625,7 @@ namespace MultiplayerMod
             try {
                 string filename = string.Format("{0:yyyy-MM-dd HH-mm-ss}.layout", DateTime.Now);
                 Logger.LogInfo("Performing Layout Backup...");
-                byte[] layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
+                byte[] layoutData = SandboxLayout.SerializeToProxies(SandboxLayout.CURRENT_VERSION).SerializeBinary();
                 string path = Path.Combine(SandboxLayout.GetSavePath(), backupFolder);
                 //Logger.LogInfo(path + " " + filename);
                 if (!Directory.Exists(path)) Directory.CreateDirectory(path);
@@ -932,7 +932,7 @@ namespace MultiplayerMod
                     instance.serverIsFrozen = false;
                 }
                 //uConsole.Log("Force Syncing layout with all connected clients...");
-                layout.layoutData = SandboxLayout.SerializeToProxies().SerializeBinary();
+                layout.layoutData = SandboxLayout.SerializeToProxies(SandboxLayout.CURRENT_VERSION).SerializeBinary();
                 layout.targetAllUsers = true;
                 message.content = layout.Serialize();
                 instance.communication.Lobby.SendBridgeAction(message);
